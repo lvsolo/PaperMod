@@ -104,8 +104,8 @@ params:
     hiddenInSingle: false #true # hide on single page
 
   editPost:
-    URL: "http://localhost:1313/content/"
-    Text: "Suggest Changes" # edit text
+    URL: "https://github.com/lvsolo/hugo-PaperMod/blob/master/content/"
+    Text: "Edit" # edit text
     appendFilePath: true # to append file path to Edit link
 
   # for search
