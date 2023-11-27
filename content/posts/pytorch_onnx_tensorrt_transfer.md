@@ -276,11 +276,43 @@ path = model.export(format="engine", dynamic=True,  simplify=True)#, half=True)#
     ```
 
 当使用`profile.set_shape('images',(1,3,1,model_input_shape[1]),(1,3,model_input_shape[0]*3//4,model_input_shape[1]),(1,3,*model_input_shape))`时，转换的结果如下：
+
 |onnx\trt|ul st fp32|ul dy fp32|tc st fp32|tc dy fp32|
 |---|---|---|---|---|
 |st fp32|O|O|O|X|
-|dy fp32|X|O|O|X|
-|st fp16|X|O|O|X|
-|dy fp16|X|O|O|X|
+|dy fp32|X|O|x|X|
+|st fp16|X|O|X|X|
+|dy fp16|X|O|x|X|
 
 如果将命令中的shape维度从4变为3，省去dim0，还可以有新的两个模型
+
+当加上`profile.set_shape('output0',(1,7,8400))`时，只有如下成功
+|onnx\trt|ul st fp32|ul dy fp32|tc st fp32|tc dy fp32|
+|---|---|---|---|---|
+|st fp32|O|x|O|X|
+|dy fp32|X|x|x|X|
+|st fp16|X|x|X|X|
+|dy fp16|X|x|x|X|
+
+不加上`profile.set_shape('output0',(1,7,8400))`,在trt engine的inference中，效果正常的如下：
+|onnx\trt|ul st fp32|ul dy fp32|tc st fp32|tc dy fp32|
+|---|---|---|---|---|
+|st fp32|O|O|X|X|
+|dy fp32|X|O|x|X|
+|st fp16|X|O|X|X|
+|dy fp16|X|O|x|X|
+
+| Model | Engine | Input Type | Input Shape | Output Shape | Set Binding Time | Preprocess Time | Test Avg Infer Time | Postprocess Time | Total Time |
+|-------|--------|------------|-------------|--------------|-------------------|------------------|----------------------|-------------------|------------|
+| Model 1 |ultrlytics_dynamic_fp32_trtapi_static_fp32 | float32 | (1, 3, 640, 640) | (1, 7, 8400) | 6.22e-05 | 0.0348 | 0.0411 | 0.4337 | 4.63 |
+| Model 2 |ultrlytics_dynamic_fp32_trtapi_dynamic_fp32 | float32 | (1, 3, 640, 640) | (1, 7, 8400) | 2.79e-05 | 0.0351 | 0.0403 | 0.4337 | 4.10 |
+| Model 3 |ultrlytics_dynamic_fp32_trtapi_static_fp16 | float32 | (1, 3, 640, 640) | (1, 7, 8400) | 3.08e-05 | 0.0333 | 0.0127 | 0.0022 | 1.34 |
+| Model 4 |ultrlytics_dynamic_fp32_trtapi_dynamic_fp16 | float32 | (1, 3, 640, 640) | (1, 7, 8400) | 2.67e-05 | 0.0346 | 0.0127 | 0.0018 | 1.34 |
+| Model 5 |ultrlytics_static_fp32__trtapi_static_fp32 | float32 | (1, 3, 640, 640) | (1, 7, 8400) | - | 0.0083 | 0.0378 | 0.0020 | 3.83 |
+
+| Model | Engine | Input Type | Input Shape | Output Shape | Set Binding Time | Preprocess Time | Test Avg Infer Time | Postprocess Time | Total Time |
+|-------|--------|------------|-------------|--------------|-------------------|------------------|----------------------|-------------------|------------|
+| Model 1 |ultrlytics_export_pt2trt_dynamic_fp32| float32 | (1, 3, 640, 640) | (1, 7, 8400) | 2.43e-05 | 0.0090 | 0.0389 | 0.4725 | 4.43 |
+| Model 2 |ultrlytics_export_pt2trt_static_fp32| float32 | (1, 3, 640, 640) | (1, 7, 8400) | - | 0.0090 | 0.0379 | 0.0019 | 3.83 |
+
+
