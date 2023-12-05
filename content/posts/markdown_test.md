@@ -19,6 +19,8 @@ tags: ['tech', 'blog']
   - [Image](#image)
   - [Video](#video)
   - [Table](#table)
+- [中文标题](#中文标题)
+  - [zhongyinghunhe中英混合](#zhongyinghunhe中英混合)
 
 
 ## table of contents
@@ -71,3 +73,7 @@ $$\int_{a}^{b} f(x)\ dx$$
 | 1        | 2        | 3        |
 | [Link](https://example.com) | ![Image](http://localhost:1313/images/cover/R-C.jpg){:width="300px" height="200px"} | <u>Underline</u> |
 
+中文输入
+
+# 中文标题
+## zhongyinghunhe中英混合

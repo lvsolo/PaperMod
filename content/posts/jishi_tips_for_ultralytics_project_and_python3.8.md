@@ -1,5 +1,5 @@
 ---
-title: "jishi tips"
+title: "jishi tips for ultralytics project and python3.8"
 author: "lvsolo"
 date: "2023-11-27"
 tags: ['jishi', 'competation', 'yolov5']
