@@ -1,5 +1,5 @@
-baseURL: "https://examplesite.com/"
-title: ExampleSite
+baseURL: "https://redfish-regular-cattle.ngrok-free.app/"
+title: 意志补丁
 paginate: 5
 theme: PaperMod
 
@@ -14,7 +14,6 @@ googleAnalytics: UA-123-45
 minify:
   disableXML: true
   minifyOutput: true
-
 
 
 params:
@@ -67,7 +66,7 @@ params:
     enabled: True # needs to be explicitly set
     title: 意志补丁
     subtitle: "一只布丁"
-    imageUrl: "images/cover/R-C.jpg"
+    imageUrl: "/images/cover/R-C.jpg"
     imageWidth: 120
     imageHeight: 120
     imageTitle: your image
@@ -100,7 +99,7 @@ params:
 
   cover:
     hidden: false #true # hide everywhere but not in structured data
-    hiddenInList: false #true # hide on list pages and home
+    hiddenInList: false #true # hide on list ages and home
     hiddenInSingle: false #true # hide on single page
 
   editPost:

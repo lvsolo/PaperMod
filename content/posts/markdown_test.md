@@ -57,7 +57,7 @@ $$ f(x) = a $$
 $$\int_{a}^{b} f(x)\ dx$$
 
 ## Image
-![alt text](http://localhost:1313/images/cover/R-C.jpg)
+![alt text](/images/cover/R-C.jpg)
 ![alt text](/images/cover/R-C.jpg)
 
 
@@ -71,7 +71,7 @@ $$\int_{a}^{b} f(x)\ dx$$
 | Left     | Center   | Right    |
 | **Bold** | *Italic* | `Code`   |
 | 1        | 2        | 3        |
-| [Link](https://example.com) | ![Image](http://localhost:1313/images/cover/R-C.jpg){:width="300px" height="200px"} | <u>Underline</u> |
+| [Link](https://example.com) | ![Image](/images/cover/R-C.jpg){:width="300px" height="200px"} | <u>Underline</u> |
 
 中文输入
 
