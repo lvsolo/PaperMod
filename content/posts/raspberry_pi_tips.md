@@ -6,5 +6,5 @@ tags: ["rasberry", "tips"]
 ---
 
 
-1.¿¿¿¿¿¿
+1.change the source to domestic
     https://zhuanlan.zhihu.com/p/161390610
