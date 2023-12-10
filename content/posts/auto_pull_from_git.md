@@ -1,7 +1,7 @@
 ---
-title: "how to auto pull the newest master branch from git"
+title: "How to auto pull the newest master branch from git"
 author: "lvsolo"
-date: "2023-12-9"
+date: "2023-12-09"
 tags: ['hugothemes']
 ---
 
