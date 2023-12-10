@@ -4,4 +4,5 @@ author: "lvsolo"
 date: "2023-12-9"
 tags: ['hugothemes']
 ---
+
 use `crontab -e` to set the periodic task, in this case , it's the `auto_pull_from_git.sh` script.
