@@ -2,6 +2,7 @@
 title: "How to download kaggle datasets with relate to some tags or keywords"
 author: "lvsolo"
 date: "2023-12-10"
+tags: ['kaggle', 'jishi']
 ---
 my scripts: [!kaggle_down](https://github.com/lvsolo/kaggle_down)
 
