@@ -1,7 +1,7 @@
 ---
 title: "tips for lidar3d detection"
 author: "lvsolo"
-date: "2023-11-30"
+date: "2024-01-05"
 tags: ["lidar", "3dDet", "commensense"]
 ---
 
