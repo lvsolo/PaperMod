@@ -1,5 +1,5 @@
 ---
-title: "python usages"
+title: "tips for lidar3d detection"
 author: "lvsolo"
 date: "2023-11-30"
 tags: ["lidar", "3dDet", "commensense"]
