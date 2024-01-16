@@ -1,3 +1,10 @@
+---
+title: "code explaination 3d, in fact 2d rotated bbox iou"
+author: "lvsolo"
+date: "2023-01-15"
+tags: ['iou', 'detection']
+---
+
 
 # Introduction 介绍
 This is a code explaination of the IOU3D calculation in the codes.In fact the codes simplified the calculation of 3D iou by projecting 3D bbox to the ground plane and calculating the IOU of the 2D BEV bbox.
