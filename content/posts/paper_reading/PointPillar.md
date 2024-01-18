@@ -20,3 +20,9 @@ graph TB
     A --> B[2D CNN Net Backbone]
     B -->C[SSD Head]
 ```
+{{< mermaid >}}
+graph TB
+    pts(points cloud) --> A[voxelize & pp scatter]
+    A --> B[2D CNN Net Backbone]
+    B -->C[SSD Head]
+{{< /mermaid >}}
