@@ -3,6 +3,7 @@ title: "PointPillar Paper Reading"
 author: "lvsolo"
 date: "2024-01-16"
 tags: ["paper reading", "lidar detection"]
+has_mermaid: true
 ---
 # Point Pillar
 
