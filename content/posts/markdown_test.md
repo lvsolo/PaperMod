@@ -77,3 +77,21 @@ $$\int_{a}^{b} f(x)\ dx$$
 
 # 中文标题
 ## zhongyinghunhe中英混合
+
+flowchart
+```mermaid
+graph TB
+    pts(points cloud) --> A[voxelize & pp scatter]
+    A --> B[2D CNN Net Backbone]
+    B -->C[SSD Head]
+```
+{{< mermaid >}}
+graph TB
+    pts(points cloud) --> A[voxelize & pp scatter]
+    A --> B[2D CNN Net Backbone]
+    B -->C[SSD Head]
+{{< /mermaid >}}
+
+
+[more diagrams charts](https://gohugo.io/content-management/diagrams/#graphics)
+
