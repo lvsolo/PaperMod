@@ -12,3 +12,5 @@ tags: ['hugothemes']
 
 2. The date format?
     the date format must be ****-**-**, for example 2023-12-9 should be 2023-12-09.
+
+TODO: [折腾 Hugo & PaperMod 主题](https://dvel.me/posts/hugo-papermod-config/)
