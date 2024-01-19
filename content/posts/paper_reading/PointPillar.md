@@ -50,3 +50,19 @@ graph TB
 ## 2.2 Head
 SSD Head:
 Assignment: BEV 2D IoU + maybe Hungarian match
+# 3.Details
+## 3.1 Network
+![Image](/images/paper_reading/point_pillar/2024-01-19_15-39.png)
+It seems that the origin network differs the Vehicle detection and pedestrian/cyclist detection from two different backbones.
+## 3.2 Loss
+![Image](/images/paper_reading/point_pillar/2024-01-19_16-12.png)
+## 3.3 Data Augmentation
+![Image](/images/paper_reading/point_pillar/2024-01-19_16-29.png)
+1.db Sampler
+2.instance rotation abd trabslations
+3.mirroring flip along x axis + global rotation and scaling
+4.apply global translation with x,y,z from N(0,0.2) to simulate localization noise.
+5.more point decorations.During the lidar point decoration step, we perform the VoxelNet  decorations plus two additional decorations:xp and yp which are the x and y offset from the pillar x, ycenter.
+![Image](/images/paper_reading/point_pillar/2024-01-19_16-41.png)
+6.remove per box data augmentation which were used in VoxelNet and SECOND.
+
