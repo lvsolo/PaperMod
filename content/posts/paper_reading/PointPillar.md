@@ -44,6 +44,8 @@ graph TB
     Voxelized_feature --> ppscatter[ppscatter] 
     ppscatter --> pseudo-image(pseudo-image\nshape:C,H,W)
 ```
+如何解决lidar pts不均匀的问题？
+ppillar需要对每个pillar中的点云进行随机采样或者padding。VoxelNet使用了element-wise max pooling，将每个voxel中的点云特征进行聚合，得到一个固定维度的特征向量。
 
 ## 2.2 Backbone
 ![Image](/images/paper_reading/point_pillar/2024-01-17_17-55.png)

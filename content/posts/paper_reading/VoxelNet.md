@@ -47,6 +47,8 @@ graph TB
     Cout --> pc[Pointwise Concat] --> feature(shape:Cout,1)
     Aggregated_feature --> pc
 ```
+如何解决lidar pts不均匀的问题？
+使用了element-wise max pooling，将每个voxel中的点云特征进行聚合，得到一个固定维度的特征向量。对比之下ppillar需要对每个pillar中的点云进行随机采样或者padding。
 ### 2.1.2 Conv middle layers
 we employ three convolution middle layers sequentially as Conv3D(128, 64, 3, (2,1,1), (1,1,1)), Conv3D(64, 64, 3, (1,1,1), (0,1,1)), and Conv3D(64, 64, 3, (2,1,1), (1,1,1)), which yields a 4D tensor of size 64 × 2 × 400 × 352. After reshaping, the input to RPN is a feature map of size 128 × 400 × 352, where the dimensions correspond to channel, height, and width of the 3D tensor.
 ### 2.1.3 RPN
