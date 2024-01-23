@@ -23,6 +23,12 @@ This paper:
 4. We introduce a novel data augmentation method for LiDAR-only learning problems that greatly increases the convergence speed and performance.
 
 # 2. Pipeline
+```mermaid
+graph TB
+    VoxelNet_BackBone[Voxelization, Sampling and stacked VFE like VoxelNet] --> encoded_features(Encoded Features) --> SparseConv --> RPN
+```
+# 3. Details
+## 3.1 Improved Sparse Convolution
 
 # Data Augmentation
 Ground Truth database is generated that contains the attributes of objs and associated pts cloud data.
