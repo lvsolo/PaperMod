@@ -1,7 +1,7 @@
 baseURL: "https://redfish-regular-cattle.ngrok-free.app/"
 title: 意志补丁
 paginate: 5
-theme: PaperMod
+theme: ../../PaperMod
 
 enableRobotsTXT: true
 buildDrafts: false

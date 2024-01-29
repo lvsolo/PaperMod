@@ -1,5 +1,8 @@
 #!/bin/bash
-
+DIR_PaperMod=$1
+if [ -z "$1" ]; then
+	DIR_PaperMod="/home/ubuntu/git/PaperMod/"
+fi
 # Set the maximum number of loops
 max_loops=4
 
@@ -9,7 +12,7 @@ counter=0
 while [ $counter -lt $max_loops ]; do
     # Your task or command here
     echo "Running your task... Loop: $counter"
-    cd /root/hugo/hugo_themes/themes/PaperMod && git pull origin master
+    cd $DIR_PaperMod && git pull origin master
     
     # Increment the counter
     ((counter++))
