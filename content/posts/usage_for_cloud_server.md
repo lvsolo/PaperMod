@@ -15,6 +15,41 @@ how to install and use hugo theme PaperMod can be found in my later blog essay:
 
 [tip for hugo themes](/posts/tips_for_hugo_themes)
 
+**but the difference is when we bind a website to a blog, we in fact direct the website DNS to a static web-directory instead of start a server using ```hugo server``` **
+so we should generate the static website content by running
+```
+hugo
+```
+in the PaperMod directory. I write the periodic programs by crontab:
+```
+* * * * *  bash /home/ubuntu/git/PaperMod/auto_pull_from_git.sh
+```
+where the shell scripts pull the latest code from git and generate static web content every minute.
+```shell
+#!/bin/bash
+DIR_PaperMod=$1
+if [ -z "$1" ]; then
+        DIR_PaperMod="/home/ubuntu/git/PaperMod/"
+fi
+# Set the maximum number of loops
+max_loops=4
+
+# Counter to keep track of the loops
+counter=0
+
+while [ $counter -lt $max_loops ]; do
+    # Your task or command here
+    echo "Running your task... Loop: $counter"
+    cd $DIR_PaperMod && git pull origin master && hugo
+    
+    # Increment the counter
+    ((counter++))
+
+    # Sleep for 30 seconds
+    sleep 15
+done
+```
+
 so how to install nginx and set the DNS web name to my server's IP?
 referring to :
 
@@ -24,6 +59,7 @@ install nginx:
 version==1.18.0
 
 the can-be-used nginx.conf is as below, should be copied to /etc/nginx/nginx.conf
+
 ```
 # 要配置的第一个地方，这里的用户要改成root，不然可能会没有权限
 user root;
@@ -66,20 +102,27 @@ http {
         server_name grass-shoes-worm.online;
         rewrite ^(.*) https://$server_name$1 permanent; #自动从http跳转到https
         # 要配置的第四个地方，这里指向public文件夹
-        root /home/ubuntu/git/PaperMod;
+        #root /home/ubuntu/git/PaperMod/;
+        #root /home/ubuntu/git/myblog/public/;
+        root /home/ubuntu/git/PaperMod/public/;
 
         include /etc/nginx/default.d/*.conf;
         
         # 要配置的第五个地方
         location / {
-            root /home/ubuntu/git/PaperMod;
+            #root /home/ubuntu/git/PaperMod/;
+
+            #root /home/ubuntu/git/myblog/public/;
+            root /home/ubuntu/git/PaperMod/public/;
             index  index.html index.htm;
         }
         
         # 要配置的第六个地方
         error_page 404 /404.html;
         location = /40x.html {
-            root /home/ubuntu/git/PaperMod;
+            #root /home/ubuntu/git/PaperMod/;
+            #root /home/ubuntu/git/myblog/public/;
+            root /home/ubuntu/git/PaperMod/public/;
         }
 
         error_page 500 502 503 504 /50x.html;
@@ -92,7 +135,9 @@ http {
          listen 443 ssl;
          # 要配置的第七个地方
          server_name grass-shoes-worm.online;
-         root /home/ubuntu/git/PaperMod;
+         #root /home/ubuntu/git/PaperMod/;
+         #root /home/ubuntu/git/myblog/public/;
+         root /home/ubuntu/git/PaperMod/public/;
          
          # 要配置的第八个地方
          ssl_certificate       /etc/nginx/grass-shoes-worm.online_bundle.crt;    #指定证书位置，默认在当前目录寻找
@@ -109,12 +154,15 @@ http {
          # 要配置的第十个地方
          error_page 404 /404.html;
          location = /404.html {
-              root /home/ubuntu/git/PaperMod;
+              #root /home/ubuntu/git/PaperMod/;
+              #root /home/ubuntu/git/myblog/public/;
+              root /home/ubuntu/git/PaperMod/public/;
          }
 
          include /etc/nginx/default.d/*.conf;
      }
 
 }
-
 ```
+
+then the website can be visited by your website-name.

@@ -24,5 +24,15 @@ tags: ['hugothemes']
     wget https://github.com/gohugoio/hugo/releases/download/v0.121.2/hugo_extended_0.121.2_linux-arm64.deb
     sudo dpkg -i hugo_extended_0.121.2_linux-arm64.deb
     ```
+4. two ways to create the blog website:
+    4.1 when using ngrok
+    ```shell
+	cd PaperMod/
+        hugo server --themesDir ../ --disableFastRender --baseURL="https://redfish-regular-cattle.ngrok-free.app/"
+    ```
+    you should  change the   baseURL to your own ngrok website-name.
 
+    4.2 when using the static web content + nginx
+    you just need to set the nginx.conf, direct your own domain name to the hugo's static content directory which is created by running ``` hugo ```   in PaperMod dir. Details can be found in [hugo+nginx](/posts/usage_for_cloud_server)
+   
 TODO: [折腾 Hugo & PaperMod 主题](https://dvel.me/posts/hugo-papermod-config/)

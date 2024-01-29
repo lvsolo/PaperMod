@@ -12,7 +12,7 @@ counter=0
 while [ $counter -lt $max_loops ]; do
     # Your task or command here
     echo "Running your task... Loop: $counter"
-    cd $DIR_PaperMod && git pull origin master
+    cd $DIR_PaperMod && git pull origin master && hugo
     
     # Increment the counter
     ((counter++))
