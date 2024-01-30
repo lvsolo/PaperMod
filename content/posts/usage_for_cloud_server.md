@@ -53,7 +53,7 @@ done
 so how to install nginx and set the DNS web name to my server's IP?
 referring to :
 
-[hugo and nginx](sulvblog.cn/posts/blog/hugo_deploy/)
+[hugo and nginx](https://sulvblog.cn/posts/blog/hugo_deploy/)
 
 install nginx:
 version==1.18.0
