@@ -56,6 +56,9 @@ $$
 $$ f(x) = a $$
 $$\int_{a}^{b} f(x)\ dx$$
 
+inline formula:\\(u \cdot x\\)
+inline formula:\\(\varphi = \dfrac{1+\sqrt5}{2}= 1.6180339887…\\)
+
 ## Image
 ![alt text](/images/cover/R-C.jpg)
 ![alt text](/images/cover/R-C.jpg)
