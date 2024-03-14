@@ -4,10 +4,12 @@ date: "2024-03-14"
 author: "lvsolo"
 tags: ["ubuntu", "linux", "vscode"]
 ---
-#1. c++ vscode debug 
+# 1. c++ vscode debug 
+
     1) The "preLaunchTask" tag in launch.json should be the same as the "label" tag in tasks.json.
     2) The "g++ -g" tag means debug mode, which will enable the breakpoints in the cpp file/program.
-##1.1 launch.json
+
+## 1.1 launch.json
 ```
 {
     // Use IntelliSense to learn about possible attributes.
@@ -43,7 +45,7 @@ tags: ["ubuntu", "linux", "vscode"]
     ]
 }
 ```
-##1.2 tasks.json
+## 1.2 tasks.json
 ```
 {
     "version": "2.0.0",
