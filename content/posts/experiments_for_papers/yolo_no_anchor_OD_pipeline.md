@@ -14,7 +14,10 @@ BaseLine：原代码中的初始模型
 3. AugFPN实现
 
 改进方式二：Loss
-1. FocalLoss实现
+1. FocalLoss实现+应用: [Focal Loss: binary/multi-classes ](/content/posts/experiments_for_papers/focalloss.md)
+2. PolyLoss
+3. VariLoss
+
 
 
 改进方式三：Attention
@@ -27,6 +30,7 @@ BaseLine：原代码中的初始模型
 1. EMA
 2. DHSA
 
+FCOS?ATSS?CenterNet
 
 
 
