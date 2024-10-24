@@ -181,7 +181,7 @@ fl = torch.sum(-alpha * (1 - preds) ** gamma * preds.log() * gt_label_one_hot, d
 因此，完全套用普适公式的话，参考CE的完整公式，结合Focal Loss原理之后应该是：
 
 $$
-\text{Modified Focal Loss} = - \left[ \alpha \cdot（1-\hat{y}_{i^*})^\gamma \cdot \text{PositiveLoss}_{i^*} + (1-\alpha) \cdot \sum_{i \neq i^*} (\hat{y}_i^\gamma \cdot \text{NegtiveLoss}_i) \right]
+\text{Modified Focal Loss} = - [ \alpha \cdot（1-\hat{y}_{i^*})^\gamma \cdot \text{PositiveLoss}_{i^*} + (1-\alpha) \cdot \sum_{i \neq i^*} (\hat{y}_i^\gamma \cdot \text{NegtiveLoss}_i) ]
 $$
 
 在Loss采用**CrossEntropyLoss**时，对正负Loss进行加权求和的公式为
