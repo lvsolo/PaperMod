@@ -14,9 +14,19 @@ BaseLine：原代码中的初始模型
 3. AugFPN实现
 
 改进方式二：Loss
-1. FocalLoss实现+应用: [Focal Loss在分类loss中的应用](/content/posts/experiments_for_papers/focalloss.md)
-2. PolyLoss
-3. VariLoss
+1. FocalLoss实现+应用: 
+
+    [Focal Loss在分类loss中的应用](/content/posts/experiments_for_papers/focalloss.md)
+
+    1.1 PolyFocalLoss
+
+    1.2 VariFocalLoss:
+
+2. IoULoss:
+
+   [IoU及其改进形式](https://learnopencv.com/iou-loss-functions-object-detection/#iou-based-loss-functions)
+
+    2.1 GIoULoss
 
 
 

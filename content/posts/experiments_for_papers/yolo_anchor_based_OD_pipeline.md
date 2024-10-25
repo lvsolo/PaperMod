@@ -9,6 +9,6 @@ Code Project: yolov3-pytorch
 BaseLine：原代码中的初始模型
 
 1. PAA：用于anchor based模型
-
+2. DIoULoss:
 
 
