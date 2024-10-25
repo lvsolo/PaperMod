@@ -112,9 +112,12 @@ $$
 **Focal Loss**本身是针对困难样本进行权重倾斜的一种方法，他的实现需要通过根不同的具体的loss函数结合进行，当与不同loss结合时，会有不同的表现形式。
 
 **Focal Loss** 的普适公式可以从正负样本的角度统一表示。普适的 **Focal Loss** 公式可以写成：
+<<<<<<< HEAD
+
 $$
 \text{Focal Loss} = \alpha (1 - \hat{y}_{i^*})^\gamma \cdot \text{Positive Loss}_{i^*} + \sum_{i \neq i^*}[(1 - \alpha) \hat{y_i}^\gamma \cdot \text{Negative Loss}_i]
 $$
+
 
 其中：
 - $i^*$是正类的标签，$\hat{y}_{i^*}$ 是模型对正类的预测概率。
@@ -144,6 +147,7 @@ $$
 - $y_i$ 是第i类的的gt label，正样本为1，负样本为0。
 
 也可以简化为:
+
 $$
 \text{Focal Loss} = - \alpha \cdot (1 - \hat{y})^\gamma \cdot \log(\hat{y}) \cdot y
 $$
@@ -152,6 +156,7 @@ $$
 - $y$ 是样本实际类别的gt label，正样本为1，负样本为0。
   
 如果不考虑**soft label**的情况， $y$恒等于1，进一步简化为：
+
 $$
 \text{Focal Loss} = - \alpha \cdot (1 - \hat{y})^\gamma \cdot \log(\hat{y}) \cdot y
 $$
@@ -173,8 +178,12 @@ fl = torch.sum(-alpha * (1 - preds) ** gamma * preds.log() * gt_label_one_hot, d
 **因为在多分类CE Loss中，使用 softmax 函数将模型的输出转化为概率分布，然后再计算交叉熵损失。在正样本的prediction做softmax操作的过程中，已经用到了其他错误分类的预测值；当我们对正样本的prediction做梯度下降时，其实也包含了对负样本预测值的优化，只不过现在这里的alpha是无效的，起不到平衡正负样本的作用，因此可以删除。**
 
 因此，完全套用普适公式的话，参考CE的完整公式，结合Focal Loss原理之后应该是：
+<<<<<<< HEAD
 $$
 \text{Modified Focal Loss} = - \left[ \alpha \cdot（1-\hat{y}_{i^*})^\gamma \cdot \text{PositiveLoss}_{i^*} + (1-\alpha) \cdot \sum_{i \neq i^*} (\hat{y}_i^\gamma \cdot \text{NegtiveLoss}_i) \right]
+
+$$
+\text{Modified Focal Loss} = - [ \alpha \cdot（1-\hat{y}_{i^*})^\gamma \cdot \text{PositiveLoss}_{i^*} + (1-\alpha) \cdot \sum_{i \neq i^*} (\hat{y}_i^\gamma \cdot \text{NegtiveLoss}_i) ]
 $$
 
 在Loss采用**CrossEntropyLoss**时，对正负Loss进行加权求和的公式为
