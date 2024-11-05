@@ -1,9 +1,11 @@
 ---
 title: "Anchor-free VS Anchor-based"
 author: "lvsolo"
+math: true
 date: "2024-11-5"
 tags: ["DeepLearning", "training", "OD", "YOLO"]
 ---
+
 # Anchor-free VS Anchor-based
 | 特征                  | **Anchor-based**                      | **Anchor-free**                     |
 |----------------------|--------------------------------------|------------------------------------|
