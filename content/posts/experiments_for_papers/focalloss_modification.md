@@ -5,3 +5,6 @@ math: true
 date: "2024-10-24"
 tags: ["DeepLearning", "Loss", "training", "YOLO", "Experiments"]
 ---
+# PolyFocalLoss
+
+# VariFocalLoss
