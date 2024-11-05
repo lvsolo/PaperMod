@@ -2,7 +2,7 @@
 title: "Anchor-free VS Anchor-based"
 author: "lvsolo"
 math: true
-date: "2024-11-5"
+date: "2024-11-05"
 tags: ["DeepLearning", "training", "OD", "YOLO"]
 ---
 
