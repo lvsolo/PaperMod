@@ -39,7 +39,7 @@ BaseLine：原代码中的初始模型
 其他改进方式：
 1. EMA
 2. DHSA
-
+3. IoU Aware
 FCOS?ATSS?CenterNet
 
 
