@@ -154,8 +154,6 @@ bs* R * P *2
 
 ![1737009344462](image/pluto/1737009344462.png)
 
-![](file:///tmp/lu3254272ywzb7m.tmp/lu3254272ywzbdg_tmp_7ed276b1cb0b30fc.png)
-
 #### 1.2.2 orientation
 
 shape:bs\*R*P
@@ -180,27 +178,31 @@ bs* min(agent_num, max_agent_num) * len(tracked_object_list)
 
 bs* A * T
 
+agent中的第0个元素是自车，category为0；agent中包含当前时刻前2秒和后8秒的数据，所以第0个元素的第20个时刻的position信息是（0，0），即：
+
+$data['agent']['position'][0][20] = (0,0)$
+
 #### 1.3.1 agent position & heading
 
-bs* A * T * 2  & bs * A * T
+bs * A * T * 2  & bs * A * T
 
 ![1737009448723](image/pluto/1737009448723.png)![1737009455329](image/pluto/1737009455329.png)
 
 #### 1.3.2 velocity
 
-bs* A * T * 2
+bs * A * T * 2
 
 #### 1.3.3 shape
 
-bs* A * T * 2
+bs * A * T * 2
 
 #### 1.3.4 category
 
-bs* A
+bs * A
 
 #### 1.3.5 valid mask
 
-bs* A * T
+bs * A * T
 
 #### 1.3.6 target (when training)
 
@@ -216,7 +218,7 @@ bs* A * T
 
 ## 2.Primer knowledge
 
-### 2.1yaw defination
+### 2.1 yaw defination
 
 ![alt text](image.png)
 
