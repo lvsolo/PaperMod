@@ -143,7 +143,6 @@ polygon实际上是通过map中的车道线（lane）和人行道（cross lane�
 ![1737009324206](image/pluto/1737009324206.png)
 
 ![1737449079918](image/pluto/1737449079918.png)
-
 #### 1.2.1 reference line position & vector
 
 shape:bs * num_reference_line * num_sampled_points * 2
@@ -153,6 +152,7 @@ bs* R * P *2
 ![](file:///tmp/lu3254272ywzb7m.tmp/lu3254272ywzbdg_tmp_516b99ff2967af2e.png)![1737009336288](image/pluto/1737009336288.png)
 
 ![1737009344462](image/pluto/1737009344462.png)
+
 
 #### 1.2.2 orientation
 
@@ -185,7 +185,6 @@ $data['agent']['position'][0][20] = (0,0)$
 #### 1.3.1 agent position & heading
 
 bs * A * T * 2  & bs * A * T
-
 ![1737009448723](image/pluto/1737009448723.png)![1737009455329](image/pluto/1737009455329.png)
 
 #### 1.3.2 velocity
@@ -203,7 +202,6 @@ bs * A
 #### 1.3.5 valid mask
 
 bs * A * T
-
 #### 1.3.6 target (when training)
 
 ![1737009578837](image/pluto/1737009578837.png)
