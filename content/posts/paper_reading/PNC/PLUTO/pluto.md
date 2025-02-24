@@ -143,6 +143,7 @@ polygon实际上是通过map中的车道线（lane）和人行道（cross lane�
 ![1737009324206](image/pluto/1737009324206.png)
 
 ![1737449079918](image/pluto/1737449079918.png)
+
 #### 1.2.1 reference line position & vector
 
 shape:bs * num_reference_line * num_sampled_points * 2
@@ -152,7 +153,6 @@ bs* R * P *2
 ![](file:///tmp/lu3254272ywzb7m.tmp/lu3254272ywzbdg_tmp_516b99ff2967af2e.png)![1737009336288](image/pluto/1737009336288.png)
 
 ![1737009344462](image/pluto/1737009344462.png)
-
 
 #### 1.2.2 orientation
 
@@ -202,6 +202,7 @@ bs * A
 #### 1.3.5 valid mask
 
 bs * A * T
+
 #### 1.3.6 target (when training)
 
 ![1737009578837](image/pluto/1737009578837.png)
@@ -220,7 +221,7 @@ bs * A * T
 
 ![alt text](image.png)
 
-### 2.2 
+### 2.2
 
 # II.Paper Comprehension
 
@@ -236,3 +237,119 @@ bs * A * T
 2. $E_o$:
 
 valid_mask的作用
+
+#### 1.1.1 Encoder
+
+##### 1.1.1.1 agent history encoder :$E_A$
+
+1.使用帧间差值作为输入；
+
+2.使用了neightbour attention1D
+
+![1740116681793](image/pluto/1740116681793.png)
+
+该natten模块没有针对onnx进行适配，无法导出可对齐的onnx模型，落地中改为multiheadattention
+
+3.FPN
+
+![1740117062661](image/pluto/1740117062661.png)
+
+##### 1.1.1.2 static obstacles encoder: $E_O$
+
+two layer mlp:
+
+![1740118329772](image/pluto/1740118329772.png)
+
+##### 1.1.1.3 AV's state encoding:$E_{AV}$
+
+![1740120135660](image/pluto/1740120135660.png)
+
+1.不使用自车历史状态信息，因为可能导致从历史信息中学到捷径。
+
+2.使用了SDE:
+
+![1740364562355](image/pluto/1740364562355.png)
+
+##### 1.1.1.4 map encoder:$E_P$
+
+![1740367295200](image/pluto/1740367295200.png)
+
+![1740367312594](image/pluto/1740367312594.png)
+
+1.poluline feature构造：
+
+![1740377072979](image/pluto/1740377072979.png)
+
+2.Pointnet like polyline encoder:
+
+![1740377229132](image/pluto/1740377229132.png)
+
+pointnet++的具体流程：
+
+1.sampling layer FPS 最远距离采样；2.grouping layer分组，以关键点为中心按距离或半径分组临近点；3.Pointnet layer 使用mlp生成特征
+
+##### 1.1.1.5 Scene Encoding
+
+![1740379956803](image/pluto/1740379956803.png)
+
+1.pose embedding：
+
+![1740382483353](image/pluto/1740382483353.png)
+
+![1740382511412](image/pluto/1740382511412.png)
+
+![1740382449024](image/pluto/1740382449024.png)
+
+2.learnable attribute embedding:$E_{attr}$
+
+map polygon attribute embedding:
+
+![1740385688652](image/pluto/1740385688652.png)
+
+agent attribute embedding:
+
+![1740385909877](image/pluto/1740385909877.png)
+
+static obstacles attribute embedding:
+
+![1740387262217](image/pluto/1740387262217.png)
+
+pose embedding:
+
+![1740385881012](image/pluto/1740385881012.png)
+
+#### 1.1.2 Decoder
+
+使用类似DETR的轨迹解码器，由于anchor free的queries会导致模型训练不稳定，所以构建了一个包含经纬度信息的半anchor free的解码器结构。
+
+![1740387798628](image/pluto/1740387798628.png)
+
+##### 1.1.2.1 Reference Lines as Lateral Queries
+
+参考线是如何生成的？
+
+![1740388894355](image/pluto/1740388894355.png)
+
+![1740388911653](image/pluto/1740388911653.png)
+
+参考线是从车道线和斑马线生成出来的，这些线是从所有的map中的polyline中在行进route路线内的线
+
+##### 1.1.2.2 Factorized Lateral-longitudinal Self-Attention
+
+如何实现一个semi-anchor-based Queries？
+
+![1740389574086](image/pluto/1740389574086.png)
+
+$N_L$：learnable queries数量
+
+$N_R$：reference lines数量
+
+1.$Q_0$的生成代码
+
+![1740391051132](image/pluto/1740391051132.png)
+
+![1740390991471](image/pluto/1740390991471.png)
+
+![1740390967469](image/pluto/1740390967469.png)
+
+2.经纬方向自注意力机制的分解，降低计算量
