@@ -340,7 +340,7 @@ pose embedding:
 
 ![1740389574086](image/pluto/1740389574086.png)
 
-$N_L$：learnable queries数量
+$N_L$：learnable queries数量，注意这个是对应longitudinal纵向的区域的，$N_L-1$为对应的参考线被分割成的线段数量， $N_L$为参考线上端点和分割点的个数；
 
 $N_R$：reference lines数量
 
@@ -353,3 +353,53 @@ $N_R$：reference lines数量
 ![1740390967469](image/pluto/1740390967469.png)
 
 2.经纬方向自注意力机制的分解，降低计算量
+
+由参考线得到的queries $Q_{lat}$:$N_R$X$D$
+
+learnable queries $Q_{lon}$:$N_L$X$D$
+
+通过concat+mlp生成的$Q_0$:$N_R$X$N_L$X$D$
+
+对$Q_0$直接使用自注意力，复杂度为$N_R^2$$N_L^2$,使用分解后的方式，分别计算第一维和第二维的自注意力，降低复杂度
+
+![1740465717997](image/pluto/1740465717997.png)
+
+##### 1.1.2.3 Trajectory Decoding
+
+![1740466511459](image/pluto/1740466511459.png)
+
+##### 1.1.2.4 Imitation Loss
+
+![1740473749500](image/pluto/1740473749500.png)
+
+示意图：
+
+![1740563851159](image/pluto/1740563851159.jpg)
+
+1.离专家轨迹的终点侧向距离最近的参考线作为target reference line。
+
+2.$N_L-1$等于参考线分割得到的线段数量，前$N_L-1$个learnable queries分别对应了target reference line中的前$N_L-1$个线段区间；
+
+![1740558922993](image/pluto/1740558922993.png)
+
+3.target reference line上的分割好的线段中，离专家轨迹的终点最近的那个线段区间对应的learnable queries会被用于计算imitation loss，通过head生成轨迹信息，注意这个线段并不一定是target reference  line的最后一段。
+
+![1740554102039](image/pluto/1740554102039.png)
+
+![1740558672812](image/pluto/1740558672812.png)![1740558672812](image/pluto/1740558672812.png)
+
+![1740477152565](image/pluto/1740477152565.png)
+
+##### 1.1.2.5 Prediction loss
+
+agent车辆轨迹预测：
+
+![1740560127070](image/pluto/1740560127070.png)
+
+![1740560261983](image/pluto/1740560261983.png)
+
+![1740560291709](image/pluto/1740560291709.png)
+
+![1740560369535](image/pluto/1740560369535.png)
+
+![1740560385679](image/pluto/1740560385679.png)
