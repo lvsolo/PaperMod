@@ -4,8 +4,8 @@ date: "2024-12-14"
 author: "lvsolo"
 tags: ["PNC", "Nuplan", "planning"]
 ---
-
 # Contents
+
 - [Contents](#contents)
 - [I. Nuplan](#i-nuplan)
   - [1. nuboard UI module create](#1-nuboard-ui-module-create)
@@ -13,14 +13,14 @@ tags: ["PNC", "Nuplan", "planning"]
     - [1) Collect tokens of some scenario type from db files](#1-collect-tokens-of-some-scenario-type-from-db-files)
   - [3. split the yamls to train](#3-split-the-yamls-to-train)
     - [1) auto split the yaml files](#1-auto-split-the-yaml-files)
-    - [2) collect and join the split yamls' metrics](#2-collect-and-join-the-split-yamls-metrics)
+    - [2) collect and join the split yamls&#39; metrics](#2-collect-and-join-the-split-yamls-metrics)
     - [3) find the bad cases](#3-find-the-bad-cases)
 
-
-
 # I. Nuplan
+
 ## 1. nuboard UI module create
-   ```python
+
+```python
     #main_callbacks.on_run_simulation_end()
     map_version = "nuplan-maps-v1.0"
     scenario_mapping = ScenarioMapping(scenario_map=get_scenario_map(), subsample_ratio_override=0.5)
@@ -36,10 +36,13 @@ tags: ["PNC", "Nuplan", "planning"]
         port_number=5006
     )
     nuboard.run()
-   ```
+```
+
 ## 2. collect the infos of nuplan dataset
-   ### 1) Collect tokens of some scenario type from db files
-   ```python
+
+### 1) Collect tokens of some scenario type from db files
+
+```python
 from typing import Optional, Union, List
 import glob 
 from collections import defaultdict as ddict
@@ -52,7 +55,7 @@ def get_tokens_from_db(db_path, scenario_type):
     conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
-     
+   
     # 查询数据库中的所有表名
     tabel = 'scenario_tag'
     # cursor.execute(f"SELECT * FROM scenario_tag;")
@@ -144,10 +147,12 @@ for k, v in sample_number_per_type.items():
     if len(my_dict[k]) < v:
         v = len(my_dict[k])
     sampled_tokens_per_type[k] = random.sample(my_dict[k], int(v))
-   ```
+```
 
-## 3. split the yamls to train 
-   ### 1) auto split the yaml files
+## 3. split the yamls to train
+
+### 1) auto split the yaml files
+
 ```bash
 
 
@@ -190,7 +195,7 @@ while IFS= read -r line; do
   
   if [[ $FLAG_TOKEN_START -eq 0 ]] ;then
     for ((IND=1; $IND<=NUM_SPLIT; IND++)); do
-        
+      
         #echo ${NEW_FPLIT_YAML_NAMES[$IND-1]} $line
         echo "$line" >> ${NEW_FPLIT_YAML_NAMES[$IND-1]}
     done
@@ -228,9 +233,12 @@ runtime=$((end-start))
 echo "Command took $runtime seconds"
 
 ```
-   ### 2) collect and join the split yamls' metrics
+
+### 2) collect and join the split yamls' metrics
+
    The metrics saved by Pluto or Planscope is in two folders:one is the metrics of each scenario token and the total mean metrics of the whole scenario tokens in the scenario_filter yaml;the other is the aggregated metrics of the whole scenario tokens in the scenario_filter yaml.
 Example Scripts:
+
 ```python
 # metrics for each scenario token
 file0='metrics/ego_progress_along_expert_route.parquet'
@@ -253,6 +261,7 @@ dfs['scenario_type'].values[:109]
 ```
 
 ### 3) find the bad cases
+
 ```python
 import pandas as pd
 import os
@@ -369,7 +378,7 @@ for i in range(1, num_split+1):
     for token, score in zip(dfs['scenario'][:int(num_tokens)],dfs['score'][:int(num_tokens)]):
         score_of_each_token[token] = score
     # score for each scenario type
-    count_of_each_scenario_type_in_this_split = ddict(int)    
+    count_of_each_scenario_type_in_this_split = ddict(int)  
     for st in dfs['scenario_type'].values[:int(num_tokens)]:
         count_of_each_scenario_type[st] += 1
         count_of_each_scenario_type_in_this_split[st]+=1
@@ -413,3 +422,29 @@ print('final score', weight_sum_of_final_score/count_total_tokens)
 print('total tokens', count_total_tokens)
 # get aggregate metrics results end
 ```
+
+# II. Metrics
+
+**ADE**
+
+Average Displacement Error，平均位移误差,ADE 是预测轨迹和真实轨迹之间所有点的平均欧几里得距离。minADE,所有轨迹中的最小值
+
+**FDE**
+
+Final Displacement Error，最终位移误差,FDE 是预测轨迹的终点与真实轨迹终点之间的欧几里得距离。minFDE，所有轨迹中的最小值
+
+**横向偏移误差（Lateral Offset Error）**
+
+横向偏移误差用于评估预测轨迹与真实轨迹在横向（通常是车辆的侧向）的偏差。它可以通过计算预测点与真实点在横向上的距离来衡量。例如，在换道轨迹预测中，横向偏移误差可以用于评估车辆在换道过程中与目标车道中心线的偏差。
+
+**纵向偏移误差（Longitudinal Offset Error）**
+
+纵向偏移误差用于评估预测轨迹与真实轨迹在纵向（通常是车辆的行驶方向）的偏差。它可以通过计算预测点与真实点在纵向上的距离来衡量。例如，在换道轨迹预测中，纵向偏移误差可以用于评估车辆在换道过程中与目标车道的纵向偏差。
+
+**横向位移的平均绝对误差（MAD for Lateral Displacement）**
+
+MAD 是一种常用的误差指标，用于衡量预测轨迹与真实轨迹在横向上的平均绝对偏差。它反映了横向偏移的平均误差大小。
+
+**纵向位移的平均绝对误差（MAD for Longitudinal Displacement）**
+
+与横向类似，纵向位移的 MAD 用于衡量预测轨迹与真实轨迹在纵向上的平均绝对偏差。
