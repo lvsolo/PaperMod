@@ -262,6 +262,9 @@ valid_mask的作用
 
 ##### 1.1.1.2 static obstacles encoder: $E_O$
 
+FourierEmbedding介绍：TODO
+
+
 two layer mlp:
 
 ![1740118329772](image/pluto/1740118329772.png)
