@@ -15,12 +15,11 @@ tags: ['leetcode']
 
 二叉搜索树：
 
-重要性质：中序遍历为排序好的序列
+重要性质：中序遍历为排序好的序列,可用于判定是否是二叉搜索树
+
+
 回溯:DFS,穷举算法，与DP动态规划区别，适用于没有最优子结构的问题
 39 78 90 101 112
-
-
-
 
 动态规划：保存子结构的最优解，适用于有最优子结构的问题
 198 322 97
@@ -54,8 +53,6 @@ https://www.lintcode.com/problem/92/
 ```
 
 多重背包
-
-
 
 完全背包
 
@@ -91,7 +88,7 @@ class Solution:
                 if nb not in map1:
                     stack.insert(0,nb)
         return map[node]
-      
+    
         # # DFS
         # if not node:
         #     return node
