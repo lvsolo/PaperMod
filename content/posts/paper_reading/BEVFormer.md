@@ -3,7 +3,6 @@ author: "lvsolo"
 date: "2025-04-10"
 tags: ["paper reading", "lidar detection", "BEV"]
 
-
 ![1744600521522](image/BEVFormer/1744600521522.png)
 
 ```python
@@ -180,6 +179,8 @@ class BEVFormerLayer(MyCustomBaseTransformerLayer):
 
 ![1744686647414](image/BEVFormer/1744686647414.png)
 
+Deformable Attention从上图可以看出，主要是两个东西 :$A_{ij}$和${\delta}p_{ij}$,分别对应Attention weights和sampling offsets，后续每次用到的时候都可以注意这两个是如何得到的
+
 ```python
 class MultiScaleDeformableAttnFunction_fp16(Function):
 
@@ -257,6 +258,8 @@ class MultiScaleDeformableAttnFunction_fp16(Function):
 
 ```
 
+TODO：Multiscale Deformable Attention中的multi scale是如何实现的？与FPN的区别和相似之处有么？
+
 
 ## Temporal Self-Attention
 
@@ -282,8 +285,6 @@ class MultiScaleDeformableAttnFunction_fp16(Function):
                 identity = query # (1, 2500, 256)
 
 ```
-
-
 
 ```python
     def forward(self,
@@ -472,7 +473,9 @@ Temporal self-attention 是一种用于聚合时间信息的机制，主要在 B
    ```python
    query = torch.cat([value[:bs], query], -1) # pre_query & query, (1, 2500, 512), cat_dim= -1
    ```
-3. **偏移预测**：与传统的自注意力机制不同，temporal self-attention 中的偏移量 \( \Delta p \) 是通过将当前查询 \( Q \) 和历史特征 \( B_{t-1} \) 进行连接后预测的。这种方式使得模型能够动态调整查询的位置，以便更好地聚焦于历史信息。
+3. **偏移预测**：与传统的自注意力机制不同，temporal self-attention 中的偏移量 \( \Delta p \) 是通过将当前查询 \( Q \) 和历史特征 \( B_{t-1} \) 进行连接后预测的。这种方式使得模型能够动态调整查询的位置，以便更好地聚焦于历史信息。同时也会生成deformable attention中的attention weights
+
+   Deformable Attention的两个东西 :$A_{ij}$和${\delta}p_{ij}$,分别对应Attention weights和sampling offsets，在temporal self attention中是通过Linear(concat(query, prev_bev))得到的
 
    ```python
    """
@@ -505,6 +508,24 @@ Temporal self-attention 是一种用于聚合时间信息的机制，主要在 B
    sampling_offsets = sampling_offsets.view(
                bs, num_query, self.num_heads,  self.num_bev_queue, self.num_levels, self.num_points, 2) # 偏移量 (1, 2500, 128) -> (1, 2500, 8, 2, 1, 4, 2)
    # 
+
+   self.attention_weights = nn.Linear(embed_dims*self.num_bev_queue,
+                                              num_bev_queue*num_heads * num_levels * num_points)
+   #此处的query也是concat(bev_query, prev_bev)
+   attention_weights = self.attention_weights(query).view(
+               bs, num_query,  self.num_heads, self.num_bev_queue, self.num_levels * self.num_points) # 权重 (1, 2500, 512) -> (1, 2500, 8, 2, 4)
+   attention_weights = attention_weights.softmax(-1)
+
+   attention_weights = attention_weights.view(bs, num_query,
+                                                      self.num_heads,
+                                                      self.num_bev_queue,
+                                                      self.num_levels,
+                                                      self.num_points) # (1, 2500, 8, 2, 4) -> (1, 2500, 8, 2, 1, 4)
+
+           # (1, 2500, 8, 2, 1, 4) -> (1, 2, 2500, 8, 1, 4) -> (2, 2500, 8, 1, 4)
+   attention_weights = attention_weights.permute(0, 3, 1, 2, 4, 5)\
+               .reshape(bs*self.num_bev_queue, num_query, self.num_heads, self.num_levels, self.num_points).contiguous()
+           # (1, 2500, 8, 2, 1, 4, 2) -> (1, 2, 2500, 8, 1, 4, 2) -> (2, 2500, 8, 1, 4, 2)
    ```
 4. **聚合历史特征**：在每个时间步，temporal self-attention 会通过关注历史的 BEV 特征，生成当前时刻的 BEV 特征 \( B_t \)。在时间序列的第一个样本中（即时间步 \( t-3 \)），由于没有可用的历史信息，temporal self-attention 会简化为常规的自注意力机制，在这种情况下，BEV 特征会使用重复的查询 \( Q \) 来代替 \( B_{t-1} \)。
 
@@ -516,8 +537,157 @@ Temporal self-attention 是一种用于聚合时间信息的机制，主要在 B
                    / offset_normalizer[None, None, None, :, None, :] 
    output = MultiScaleDeformableAttnFunction.apply(
                    value, spatial_shapes, level_start_index, sampling_locations,
-                   attention_weights, self.im2col_step) # (2, 2500, 256)
+                   attention_weights, self.im2col_step) # (2, 2500, 256) 这里只用到了prev_bev（value)，因此实际上是自注意力self-attention,只不过deformableattention中的sampling_location是query和prev_bev concat之后过LInear得到的
    ```
 5. **输出生成**：最终	，生成的 BEV 特征 \( B_t \) 包含了跨越多个时间步的空间和时间线索，这些特征随后被送入检测和分割头进行任务处理。
 
 通过这种流程，temporal self-attention 能够有效地整合时间信息，从而提升对动态环境的理解，尤其是在处理移动物体的速度估计和高度遮挡物体的检测方面表现出色。
+
+## Spatial Cross Attention
+
+```python
+            # spaital cross attention
+            elif layer == 'cross_attn':
+                query = self.attentions[attn_index](
+                    query, # (1, 2500, 256)
+                    key, # (6, 375, 1, 256)
+                    value, # (6, 375, 1, 256)
+                    identity if self.pre_norm else None, # None
+                    query_pos=query_pos, # (1, 2500, 256)
+                    key_pos=key_pos, # (1, 2500, 256)
+                    reference_points=ref_3d, # (1, 4, 2500, 3)
+                    reference_points_cam=reference_points_cam, # (6, 1, 2500, 4, 2)
+                    mask=mask, # (6, 1, 2500, 4)
+                    attn_mask=attn_masks[attn_index], # None
+                    key_padding_mask=key_padding_mask, # None
+                    spatial_shapes=spatial_shapes, # [[15, 25]]
+                    level_start_index=level_start_index, # [0]
+                    **kwargs)
+```
+
+```python
+    def forward(self,
+                query,
+                key,
+                value,
+                residual=None,
+                query_pos=None,
+                key_padding_mask=None,
+                reference_points=None,
+                spatial_shapes=None,
+                reference_points_cam=None,
+                bev_mask=None,
+                level_start_index=None,
+                flag='encoder',
+                **kwargs):
+        """Forward Function of Detr3DCrossAtten.
+        Args:
+            query (Tensor): Query of Transformer with shape
+                (num_query, bs, embed_dims).
+            key (Tensor): The key tensor with shape
+                `(num_key, bs, embed_dims)`.
+            value (Tensor): The value tensor with shape
+                `(num_key, bs, embed_dims)`. (B, N, C, H, W)
+            residual (Tensor): The tensor used for addition, with the
+                same shape as `x`. Default None. If None, `x` will be used.
+            query_pos (Tensor): The positional encoding for `query`.
+                Default: None.
+            key_pos (Tensor): The positional encoding for  `key`. Default
+                None.
+            reference_points (Tensor):  The normalized reference
+                points with shape (bs, num_query, 4),
+                all elements is range in [0, 1], top-left (0,0),
+                bottom-right (1, 1), including padding area.
+                or (N, Length_{query}, num_levels, 4), add
+                additional two dimensions is (w, h) to
+                form reference boxes.
+            key_padding_mask (Tensor): ByteTensor for `query`, with
+                shape [bs, num_key].
+            spatial_shapes (Tensor): Spatial shape of features in
+                different level. With shape  (num_levels, 2),
+                last dimension represent (h, w).
+            level_start_index (Tensor): The start index of each level.
+                A tensor has shape (num_levels) and can be represented
+                as [0, h_0*w_0, h_0*w_0+h_1*w_1, ...].
+        Returns:
+             Tensor: forwarded results with shape [num_query, bs, embed_dims].
+        """
+
+        if key is None:
+            key = query
+        if value is None:
+            value = key
+
+        if residual is None:
+            inp_residual = query
+            slots = torch.zeros_like(query)
+        if query_pos is not None:
+            query = query + query_pos # (1, 2500, 256) + (1, 2500, 256) -> (1, 2500, 256)
+
+        bs, num_query, _ = query.size() # 1, 2500, 256
+
+        D = reference_points_cam.size(3) # (6, 1, 2500, 4, 2), D=4
+        indexes = []
+        for i, mask_per_img in enumerate(bev_mask): # bev_mask: (6, 1, 2500, 4)
+            # mask_per_img: (1, 2500, 4) 单相机mask
+            index_query_per_img = mask_per_img[0].sum(-1).nonzero().squeeze(-1) # (1, 2500, 4) -> (2500, 4) -> (2500, ) -> (393, 1) -> (393, )
+            indexes.append(index_query_per_img)
+        max_len = max([len(each) for each in indexes]) # index最大长度
+
+        # each camera only interacts with its corresponding BEV queries. This step can  greatly save GPU memory.
+        queries_rebatch = query.new_zeros(
+            [bs, self.num_cams, max_len, self.embed_dims]) # (1, 6, max_len, 256)
+        reference_points_rebatch = reference_points_cam.new_zeros(
+            [bs, self.num_cams, max_len, D, 2]) # (1, 6, max_len, 4, 2)
+  
+        for j in range(bs): # per_batch
+            for i, reference_points_per_img in enumerate(reference_points_cam):  # per_cam
+                index_query_per_img = indexes[i] # (393, )
+                # queries_rebatch[j, i, :len(index_query_per_img)]: j-th batch, i-th cam, max_len
+                # query[j, index_query_per_img]: query, (1, 2500, 256), j-th batch, query_index, 从对应index采样query，放到queries_rebatch里面
+                queries_rebatch[j, i, :len(index_query_per_img)] = query[j, index_query_per_img]
+                # 从对应index采样reference_points，放到reference_points_rebatch里面
+                reference_points_rebatch[j, i, :len(index_query_per_img)] = reference_points_per_img[j, index_query_per_img]
+
+        num_cams, l, bs, embed_dims = key.shape # 6, 15*25, 1, 256 
+
+        key = key.permute(2, 0, 1, 3).reshape(
+            bs * self.num_cams, l, self.embed_dims) # (6, 375, 1, 256) -> (1, 6, 375, 256) -> (6, 375, 256)
+        value = value.permute(2, 0, 1, 3).reshape(
+            bs * self.num_cams, l, self.embed_dims) # (6, 375, 1, 256) -> (1, 6, 375, 256) -> (6, 375, 256)
+
+        # query: (1, 6, max_len, 256) -> (6, max_len, 256)
+        # key: (6, 375, 256)
+        # value: (6, 375, 256)
+        # ref_p: (1, 6, max_len, 4, 2) -> (6, max_len, 4, 2)
+        # spatial_shapes: [[15, 25]]
+        # level_start_index: [0]
+        queries = self.deformable_attention(query=queries_rebatch.view(bs*self.num_cams, max_len, self.embed_dims), key=key, value=value,
+                                            reference_points=reference_points_rebatch.view(bs*self.num_cams, max_len, D, 2), spatial_shapes=spatial_shapes,
+                                            level_start_index=level_start_index).view(bs, self.num_cams, max_len, self.embed_dims) # (1, 6, max_len, 256)
+
+        for j in range(bs): # per_batch
+            for i, index_query_per_img in enumerate(indexes): # per_img
+                # j-th batch, 对应index += queries特征
+                slots[j, index_query_per_img] += queries[j, i, :len(index_query_per_img)]
+
+        count = bev_mask.sum(-1) > 0 # (6, 1, 2500, 4) -> (6, 1, 2500) 高度求和
+        count = count.permute(1, 2, 0).sum(-1) # (6, 1, 2500) -> (1, 2500, 6) -> (1, 2500) 相机维度求和
+        count = torch.clamp(count, min=1.0) # (1, 2500)
+        slots = slots / count[..., None] # 取均值，(1, 2500, 256) / (1, 2500, 1) slot: (1, 2500, 256)
+        slots = self.output_proj(slots) # 线性层, (1, 2500, 256)
+
+        return self.dropout(slots) + inp_residual # (1, 2500, 256)
+
+```
+
+Spatial cross attention的详细流程主要涉及如何从多摄像头视图中提取和聚合空间特征。以下是其详细介绍：
+
+1. **输入特征获取**：在每个时间戳t时，我们首先将多摄像头的图像输入到主干网络（如ResNet-101），从而获得不同摄像头视图的特征F_t = {F_i^t}（i=1到N_view），其中N_view是摄像头的总数量，F_i^t表示第i个视图的特征。同时，我们保留前一个时间戳t-1的BEV特征B_{t-1}。
+2. **BEV查询定义**：我们预定义了一组网格形状的可学习参数Q，这些参数用作BEVFormer中的查询。每个查询Q_p与BEV平面中的一个网格单元对应，其位置为p = (x, y)，并负责查询该位置的空间特征。
+3. **参考点的生成**：对于每个BEV查询Q_p，我们通过一个投影函数P(p, i, j)来获取与之对应的多个参考点。这些参考点是在3D空间中定义的（x, y, z_j），z_j是预定义的一组锚定高度。通过将这些3D参考点投影到不同的2D摄像头视图上，我们可以确定其在每个视图中的位置。
+4. **交互过程**：在空间交叉注意力层中，每个BEV查询Q_p只与其在多摄像头视图中的感兴趣区域进行交互。具体来说，使用deformable attention机制，每个BEV查询会与其对应的参考点进行交互，从而提取与该查询相关的空间特征。这种方式降低了计算成本，因为它避免了全局注意力机制的高开销。
+5. **特征聚合**：通过以上步骤，每个BEV查询Q_p从各个摄像头视图中聚合特征，生成一个增强的BEV特征表示。这个过程不仅考虑了空间特征的多样性，还确保了有效的信息聚合。
+6. **输出处理**：经过空间交叉注意力层后，特征被输入到前馈网络中进行进一步的处理，最终输出的BEV特征将作为下一个编码层的输入。通过多层堆叠，最终生成的BEV特征B_t将包含丰富的空间信息，供后续的3D目标检测和地图分割等任务使用。
+
+综上所述，空间交叉注意力的流程是通过对多摄像头视图的特征进行选择性交互和聚合，实现了高效且精确的空间信息提取。这种设计不仅提升了模型的性能，还降低了计算复杂度。
