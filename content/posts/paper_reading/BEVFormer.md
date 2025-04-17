@@ -260,7 +260,6 @@ class MultiScaleDeformableAttnFunction_fp16(Function):
 
 TODO：Multiscale Deformable Attention中的multi scale是如何实现的？与FPN的区别和相似之处有么？
 
-
 ## Temporal Self-Attention
 
 ```python
@@ -543,6 +542,18 @@ Temporal self-attention 是一种用于聚合时间信息的机制，主要在 B
 
 通过这种流程，temporal self-attention 能够有效地整合时间信息，从而提升对动态环境的理解，尤其是在处理移动物体的速度估计和高度遮挡物体的检测方面表现出色。
 
+## Image Feature Abstraction
+
+1.通过grid_mask模块随机遮挡进行数据增强
+
+在垂直和水平方向应用遮挡、允许随机旋转、不启用随机偏移、遮挡比例为0.5、遮挡为部分为白色、应用遮挡的概率为0.7（遮挡概率可以随着训练的进行逐步增加）
+
+2.多尺度特征mlvl_feats(multi-level features)
+
+在bevformer_base和bevformer_small中应该都是多尺度的，返回是一个hw不同的list of tensor;在bevformer_tiny中，没有使用多尺度所以输出是一个list但是只有一个15*25的tensor
+
+在进入encode阶段的时候，会将多尺度特征拼接成一个向量
+
 ## Spatial Cross Attention
 
 ```python
@@ -563,6 +574,44 @@ Temporal self-attention 是一种用于聚合时间信息的机制，主要在 B
                     spatial_shapes=spatial_shapes, # [[15, 25]]
                     level_start_index=level_start_index, # [0]
                     **kwargs)
+# 此处的query是从上一个temporal模块传入的，key value是从encode模块的输入直接得到的，是多摄像机图像提取的特征
+	bev_embed = self.encoder(
+            bev_queries, # (2500, 1, 256)
+            feat_flatten, # (6, 375, 1, 256)
+            feat_flatten, # (6, 375, 1, 256)
+            bev_h=bev_h, # 50
+            bev_w=bev_w, # 50
+            bev_pos=bev_pos, # (2500, 1, 256)
+            spatial_shapes=spatial_shapes, # [[15, 25]]
+            level_start_index=level_start_index, # [0]
+            prev_bev=prev_bev, # None or (2500, 1, 256)
+            shift=shift, # (1, 2)
+            **kwargs
+        )
+#图像特征来自mlvl模块
+	feat_flatten = []
+        spatial_shapes = []
+        for lvl, feat in enumerate(mlvl_feats): # 遍历多尺度特征
+            bs, num_cam, c, h, w = feat.shape # 1, 6, 256, 15, 25
+            spatial_shape = (h, w) # (15, 25)
+            feat = feat.flatten(3).permute(1, 0, 3, 2) # (1, 6, 256, 375) -> (6, 1, 375, 256)
+            if self.use_cams_embeds: # self.cams_embeds, (6, 256)
+                feat = feat + self.cams_embeds[:, None, None, :].to(feat.dtype) # (6, 1, 375, 256) + (6, 1, 1, 256) -> (6, 1, 375, 256)
+            # self.level_embeds: (4, 256)
+            feat = feat + self.level_embeds[None,
+                                            None, lvl:lvl + 1, :].to(feat.dtype) # (6, 1, 375, 256) + (1, 1, 1, 256) -> (6, 1, 375, 256)
+            spatial_shapes.append(spatial_shape)
+            feat_flatten.append(feat)
+
+        feat_flatten = torch.cat(feat_flatten, 2) # 特征图拼接, (6, 1, 375, 256)
+        spatial_shapes = torch.as_tensor(
+            spatial_shapes, dtype=torch.long, device=bev_pos.device) # [[15, 25]]
+        level_start_index = torch.cat((spatial_shapes.new_zeros(
+            (1,)), spatial_shapes.prod(1).cumsum(0)[:-1])) # [0]
+
+
+        feat_flatten = feat_flatten.permute(
+            0, 2, 1, 3)  # (num_cam, H*W, bs, embed_dims) (6, 1, 375, 256) -> (6, 375, 1, 256)
 ```
 
 ```python
