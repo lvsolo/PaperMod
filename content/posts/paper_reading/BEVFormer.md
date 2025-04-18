@@ -1,7 +1,7 @@
-title: "LSS:lift splat shoot"
+title: "BEVFormer"
 author: "lvsolo"
-date: "2025-04-10"
-tags: ["paper reading", "lidar detection", "BEV"]
+date: "2025-04-18"
+tags: ["paper reading",  "BEV"]
 
 ![1744600521522](image/BEVFormer/1744600521522.png)
 
@@ -550,9 +550,56 @@ Temporal self-attention 是一种用于聚合时间信息的机制，主要在 B
 
 2.多尺度特征mlvl_feats(multi-level features)
 
-在bevformer_base和bevformer_small中应该都是多尺度的，返回是一个hw不同的list of tensor;在bevformer_tiny中，没有使用多尺度所以输出是一个list但是只有一个15*25的tensor
+在bevformer_base中应该都是多尺度的，返回是一个hw不同的list of tensor;在bevformer_tiny和bevformer_small中，没有使用多尺度所以输出是一个list但是只有一个15*25的tensor
 
 在进入encode阶段的时候，会将多尺度特征拼接成一个向量
+
+```python
+        feat_flatten = []
+        spatial_shapes = []
+        for lvl, feat in enumerate(mlvl_feats): # 遍历多尺度特征
+            bs, num_cam, c, h, w = feat.shape # 1, 6, 256, 15, 25
+            spatial_shape = (h, w) # (15, 25)
+            feat = feat.flatten(3).permute(1, 0, 3, 2) # (1, 6, 256, 375) -> (6, 1, 375, 256)
+            if self.use_cams_embeds: # self.cams_embeds, (6, 256)
+                feat = feat + self.cams_embeds[:, None, None, :].to(feat.dtype) # (6, 1, 375, 256) + (6, 1, 1, 256) -> (6, 1, 375, 256)
+            # self.level_embeds: (4, 256)
+            feat = feat + self.level_embeds[None,
+                                            None, lvl:lvl + 1, :].to(feat.dtype) # (6, 1, 375, 256) + (1, 1, 1, 256) -> (6, 1, 375, 256)
+            spatial_shapes.append(spatial_shape)
+            feat_flatten.append(feat)
+```
+
+特征图拼接, 对于bevformer_base模型[(6, 1, 375, 256)，(6, 1, 375*4, 256)，(6, 1, 375*4*4, 256)]->[(6,1,375+375*4+375*4*4,256)]，这个是假设三个多尺度特征度的shape依次是2次下采样
+
+```python
+ 	feat_flatten = torch.cat(feat_flatten, 2) # 特征图拼接, 对于bevformer_base模型[(6, 1, 375, 256)，(6, 1, 375*4, 256)，(6, 1, 375*4*4, 256)]->[(6,1,375+375*4+375*4*4,256)]，这个是假设三个多尺度特征度的shape依次是2次下采样
+        spatial_shapes = torch.as_tensor(
+            spatial_shapes, dtype=torch.long, device=bev_pos.device) # [[15, 25]]
+        level_start_index = torch.cat((spatial_shapes.new_zeros(
+            (1,)), spatial_shapes.prod(1).cumsum(0)[:-1])) # [0]
+	feat_flatten = feat_flatten.permute(
+            0, 2, 1, 3)  # (num_cam, H*W, bs, embed_dims) (6, 1, 375, 256) -> (6, 375, 1, 256)
+```
+
+encoder 的key和value就是后续在spatial cross attention中的key和value，都是图像fpn输出concat后的结果
+
+```python
+	#encoder 的key和value就是后续在spatial cross attention中的key和value，都是图像fpn输出concat后的结果
+        bev_embed = self.encoder(
+            bev_queries, # (2500, 1, 256)
+            feat_flatten, # (6, 375, 1, 256)
+            feat_flatten, # (6, 375, 1, 256)
+            bev_h=bev_h, # 50
+            bev_w=bev_w, # 50
+            bev_pos=bev_pos, # (2500, 1, 256)
+            spatial_shapes=spatial_shapes, # [[15, 25]]
+            level_start_index=level_start_index, # [0]
+            prev_bev=prev_bev, # None or (2500, 1, 256)
+            shift=shift, # (1, 2)
+            **kwargs
+        ) # (1, 2500, 256)
+```
 
 ## Spatial Cross Attention
 
@@ -574,8 +621,15 @@ Temporal self-attention 是一种用于聚合时间信息的机制，主要在 B
                     spatial_shapes=spatial_shapes, # [[15, 25]]
                     level_start_index=level_start_index, # [0]
                     **kwargs)
-# 此处的query是从上一个temporal模块传入的，key value是从encode模块的输入直接得到的，是多摄像机图像提取的特征
-	bev_embed = self.encoder(
+
+
+```
+
+
+此处的query是从上一个temporal模块传入的，key value是从encode模块的输入直接得到的，是多摄像机图像提取的特征
+
+```python
+bev_embed = self.encoder(
             bev_queries, # (2500, 1, 256)
             feat_flatten, # (6, 375, 1, 256)
             feat_flatten, # (6, 375, 1, 256)
@@ -588,8 +642,12 @@ Temporal self-attention 是一种用于聚合时间信息的机制，主要在 B
             shift=shift, # (1, 2)
             **kwargs
         )
-#图像特征来自mlvl模块
-	feat_flatten = []
+```
+
+ 图像特征来自mlvl模块
+
+```python
+feat_flatten = []
         spatial_shapes = []
         for lvl, feat in enumerate(mlvl_feats): # 遍历多尺度特征
             bs, num_cam, c, h, w = feat.shape # 1, 6, 256, 15, 25
@@ -603,16 +661,19 @@ Temporal self-attention 是一种用于聚合时间信息的机制，主要在 B
             spatial_shapes.append(spatial_shape)
             feat_flatten.append(feat)
 
-        feat_flatten = torch.cat(feat_flatten, 2) # 特征图拼接, (6, 1, 375, 256)
+    feat_flatten = torch.cat(feat_flatten, 2) # 特征图拼接, (6, 1, 375, 256)
         spatial_shapes = torch.as_tensor(
             spatial_shapes, dtype=torch.long, device=bev_pos.device) # [[15, 25]]
         level_start_index = torch.cat((spatial_shapes.new_zeros(
             (1,)), spatial_shapes.prod(1).cumsum(0)[:-1])) # [0]
 
-
-        feat_flatten = feat_flatten.permute(
+    feat_flatten = feat_flatten.permute(
             0, 2, 1, 3)  # (num_cam, H*W, bs, embed_dims) (6, 1, 375, 256) -> (6, 375, 1, 256)
 ```
+
+
+
+
 
 ```python
     def forward(self,
@@ -730,13 +791,17 @@ Temporal self-attention 是一种用于聚合时间信息的机制，主要在 B
 
 ```
 
+
+
+
 Spatial cross attention的详细流程主要涉及如何从多摄像头视图中提取和聚合空间特征。以下是其详细介绍：
 
 1. **输入特征获取**：在每个时间戳t时，我们首先将多摄像头的图像输入到主干网络（如ResNet-101），从而获得不同摄像头视图的特征F_t = {F_i^t}（i=1到N_view），其中N_view是摄像头的总数量，F_i^t表示第i个视图的特征。同时，我们保留前一个时间戳t-1的BEV特征B_{t-1}。
-2. **BEV查询定义**：我们预定义了一组网格形状的可学习参数Q，这些参数用作BEVFormer中的查询。每个查询Q_p与BEV平面中的一个网格单元对应，其位置为p = (x, y)，并负责查询该位置的空间特征。
+2. **BEV查询定义**：我们预定义了一组网格形状的可学习参数Q，这些参数用作BEVFormer中的查询。每个查询Q_p与BEV平面中的一个网格单元对应，其位置为p = (x, y)，并负责查询该位置的空间特征。bev_query是从前序的temporal self attention传过来的
 3. **参考点的生成**：对于每个BEV查询Q_p，我们通过一个投影函数P(p, i, j)来获取与之对应的多个参考点。这些参考点是在3D空间中定义的（x, y, z_j），z_j是预定义的一组锚定高度。通过将这些3D参考点投影到不同的2D摄像头视图上，我们可以确定其在每个视图中的位置。
-4. **交互过程**：在空间交叉注意力层中，每个BEV查询Q_p只与其在多摄像头视图中的感兴趣区域进行交互。具体来说，使用deformable attention机制，每个BEV查询会与其对应的参考点进行交互，从而提取与该查询相关的空间特征。这种方式降低了计算成本，因为它避免了全局注意力机制的高开销。
-5. **特征聚合**：通过以上步骤，每个BEV查询Q_p从各个摄像头视图中聚合特征，生成一个增强的BEV特征表示。这个过程不仅考虑了空间特征的多样性，还确保了有效的信息聚合。
-6. **输出处理**：经过空间交叉注意力层后，特征被输入到前馈网络中进行进一步的处理，最终输出的BEV特征将作为下一个编码层的输入。通过多层堆叠，最终生成的BEV特征B_t将包含丰富的空间信息，供后续的3D目标检测和地图分割等任务使用。
+   reference points 2D/3D的整个计算流程：
+5. **交互过程**：在空间交叉注意力层中，每个BEV查询Q_p只与其在多摄像头视图中的感兴趣区域进行交互。具体来说，使用deformable attention机制，每个BEV查询会与其对应的参考点进行交互，从而提取与该查询相关的空间特征。这种方式降低了计算成本，因为它避免了全局注意力机制的高开销。
+6. **特征聚合**：通过以上步骤，每个BEV查询Q_p从各个摄像头视图中聚合特征，生成一个增强的BEV特征表示。这个过程不仅考虑了空间特征的多样性，还确保了有效的信息聚合。
+7. **输出处理**：经过空间交叉注意力层后，特征被输入到前馈网络中进行进一步的处理，最终输出的BEV特征将作为下一个编码层的输入。通过多层堆叠，最终生成的BEV特征B_t将包含丰富的空间信息，供后续的3D目标检测和地图分割等任务使用。
 
 综上所述，空间交叉注意力的流程是通过对多摄像头视图的特征进行选择性交互和聚合，实现了高效且精确的空间信息提取。这种设计不仅提升了模型的性能，还降低了计算复杂度。
