@@ -175,6 +175,8 @@ class BEVFormerLayer(MyCustomBaseTransformerLayer):
 
 ```
 
+# Encoder
+
 ## Deformable attention
 
 ![1744686647414](image/BEVFormer/1744686647414.png)
@@ -259,6 +261,85 @@ class MultiScaleDeformableAttnFunction_fp16(Function):
 ```
 
 TODO：Multiscale Deformable Attention中的multi scale是如何实现的？与FPN的区别和相似之处有么？
+
+### Reference Points in Deformable attention
+
+```python
+        # 3d参考点 ref_3d: (1, 4, 2500, 3)
+        # self.pc_range[5]-self.pc_range[2] 8
+        # pc_range = [-51.2, -51.2, -5.0, 51.2, 51.2, 3.0]
+        # self.num_points_in_pillar 4
+        ref_3d = self.get_reference_points(
+            bev_h, bev_w, self.pc_range[5]-self.pc_range[2], self.num_points_in_pillar, dim='3d', bs=bev_query.size(1),  device=bev_query.device, dtype=bev_query.dtype)
+        # (1, 4, 2500, 3)
+        ref_2d = self.get_reference_points(
+            bev_h, bev_w, dim='2d', bs=bev_query.size(1), device=bev_query.device, dtype=bev_query.dtype)
+        # (1, 2500, 1, 2) 
+
+        reference_points_cam, bev_mask = self.point_sampling(
+            ref_3d, self.pc_range, kwargs['img_metas']) # ref_3d -> ref_3d_cam, (6, 1, 2500, 4, 2), (6, 1, 2500, 4)
+
+        # bug: this code should be 'shift_ref_2d = ref_2d.clone()', we keep this bug for reproducing our results in paper.
+        shift_ref_2d = ref_2d  # .clone() # 获取BEV平面上的2D参考点
+        shift_ref_2d += shift[:, None, None, :] # 在原始参考点的基础上+偏移量 (1, 2500, 1, 2) 
+
+```
+
+get_reference_points函数,可以看到reference points不论三维还是二维，都是在pc_cloud_range（xy:[-50,+50],z:[-5,3])的范围内均匀分布的，每个维度的大小取决于bev feat的HW shape（50*50)，以及每个pillar中选择的reference points 的数量（4)
+
+```python
+def get_reference_points(H, W, Z=8, num_points_in_pillar=4, dim='3d', bs=1, device='cuda', dtype=torch.float):
+        """Get the reference points used in SCA and TSA.
+        Args:
+            H, W: spatial shape of bev.
+            Z: hight of pillar.
+            D: sample D points uniformly from each pillar.
+            device (obj:`device`): The device where
+                reference_points should be.
+        Returns:
+            Tensor: reference points used in decoder, has \
+                shape (bs, num_keys, num_levels, 2).
+        """
+
+        # reference points in 3D space, used in spatial cross-attention (SCA)
+        if dim == '3d':
+            # 0.5~7.5中间均匀采样4个点 (4,)-->(4, 1, 1)-->(4, 50, 50) 归一化
+            zs = torch.linspace(0.5, Z - 0.5, num_points_in_pillar, dtype=dtype,
+                                device=device).view(-1, 1, 1).expand(num_points_in_pillar, H, W) / Z
+            # 0.5~49.5中间均匀采样50个点 (50,)-->(1, 1, 50)-->(4, 50, 50) 归一化
+            xs = torch.linspace(0.5, W - 0.5, W, dtype=dtype,
+                                device=device).view(1, 1, W).expand(num_points_in_pillar, H, W) / W
+            # 0.5~49.5中间均匀采样50个点 (50,)-->(1, 50, 1)-->(4, 50, 50) 归一化
+            ys = torch.linspace(0.5, H - 0.5, H, dtype=dtype,
+                                device=device).view(1, H, 1).expand(num_points_in_pillar, H, W) / H
+            ref_3d = torch.stack((xs, ys, zs), -1) # (4, 50, 50, 3)
+            ref_3d = ref_3d.permute(0, 3, 1, 2).flatten(2).permute(0, 2, 1) # (4, 50, 50, 3) -> (4, 3, 50, 50) -> (4, 3, 2500) -> (4, 2500, 3)
+            ref_3d = ref_3d[None].repeat(bs, 1, 1, 1) # (4, 2500, 3) -> (1, 4, 2500, 3) -> (1, 4, 2500, 3)
+            return ref_3d # (1, 4, 2500, 3)
+
+        # reference points on 2D bev plane, used in temporal self-attention (TSA).
+        elif dim == '2d':
+            ref_y, ref_x = torch.meshgrid(
+                torch.linspace(
+                    0.5, H - 0.5, H, dtype=dtype, device=device),
+                torch.linspace(
+                    0.5, W - 0.5, W, dtype=dtype, device=device)
+            ) # (50, 50)
+            ref_y = ref_y.reshape(-1)[None] / H # (50, 50) -> (2500, ) ->  (1, 2500)
+            ref_x = ref_x.reshape(-1)[None] / W # (50, 50) -> (2500, ) ->  (1, 2500)
+            ref_2d = torch.stack((ref_x, ref_y), -1) # (1, 2500, 2)
+            ref_2d = ref_2d.repeat(bs, 1, 1).unsqueeze(2) # (1, 2500, 2) -> (1, 2500, 1, 2)
+            return ref_2d # (1, 2500, 1, 2)
+```
+
+将3d reference points映射到图像坐标系中
+
+```python
+reference_points_cam, bev_mask = self.point_sampling(
+            ref_3d, self.pc_range, kwargs['img_metas']) # ref_3d -> ref_3d_cam, (6, 1, 2500, 4, 2), (6, 1, 2500, 4)
+```
+
+
 
 ## Temporal Self-Attention
 
@@ -625,7 +706,6 @@ encoder 的key和value就是后续在spatial cross attention中的key和value，
 
 ```
 
-
 此处的query是从上一个temporal模块传入的，key value是从encode模块的输入直接得到的，是多摄像机图像提取的特征
 
 ```python
@@ -670,10 +750,6 @@ feat_flatten = []
     feat_flatten = feat_flatten.permute(
             0, 2, 1, 3)  # (num_cam, H*W, bs, embed_dims) (6, 1, 375, 256) -> (6, 375, 1, 256)
 ```
-
-
-
-
 
 ```python
     def forward(self,
@@ -791,17 +867,14 @@ feat_flatten = []
 
 ```
 
-
-
-
 Spatial cross attention的详细流程主要涉及如何从多摄像头视图中提取和聚合空间特征。以下是其详细介绍：
 
 1. **输入特征获取**：在每个时间戳t时，我们首先将多摄像头的图像输入到主干网络（如ResNet-101），从而获得不同摄像头视图的特征F_t = {F_i^t}（i=1到N_view），其中N_view是摄像头的总数量，F_i^t表示第i个视图的特征。同时，我们保留前一个时间戳t-1的BEV特征B_{t-1}。
 2. **BEV查询定义**：我们预定义了一组网格形状的可学习参数Q，这些参数用作BEVFormer中的查询。每个查询Q_p与BEV平面中的一个网格单元对应，其位置为p = (x, y)，并负责查询该位置的空间特征。bev_query是从前序的temporal self attention传过来的
 3. **参考点的生成**：对于每个BEV查询Q_p，我们通过一个投影函数P(p, i, j)来获取与之对应的多个参考点。这些参考点是在3D空间中定义的（x, y, z_j），z_j是预定义的一组锚定高度。通过将这些3D参考点投影到不同的2D摄像头视图上，我们可以确定其在每个视图中的位置。
    reference points 2D/3D的整个计算流程：
-5. **交互过程**：在空间交叉注意力层中，每个BEV查询Q_p只与其在多摄像头视图中的感兴趣区域进行交互。具体来说，使用deformable attention机制，每个BEV查询会与其对应的参考点进行交互，从而提取与该查询相关的空间特征。这种方式降低了计算成本，因为它避免了全局注意力机制的高开销。
-6. **特征聚合**：通过以上步骤，每个BEV查询Q_p从各个摄像头视图中聚合特征，生成一个增强的BEV特征表示。这个过程不仅考虑了空间特征的多样性，还确保了有效的信息聚合。
-7. **输出处理**：经过空间交叉注意力层后，特征被输入到前馈网络中进行进一步的处理，最终输出的BEV特征将作为下一个编码层的输入。通过多层堆叠，最终生成的BEV特征B_t将包含丰富的空间信息，供后续的3D目标检测和地图分割等任务使用。
+4. **交互过程**：在空间交叉注意力层中，每个BEV查询Q_p只与其在多摄像头视图中的感兴趣区域进行交互。具体来说，使用deformable attention机制，每个BEV查询会与其对应的参考点进行交互，从而提取与该查询相关的空间特征。这种方式降低了计算成本，因为它避免了全局注意力机制的高开销。
+5. **特征聚合**：通过以上步骤，每个BEV查询Q_p从各个摄像头视图中聚合特征，生成一个增强的BEV特征表示。这个过程不仅考虑了空间特征的多样性，还确保了有效的信息聚合。
+6. **输出处理**：经过空间交叉注意力层后，特征被输入到前馈网络中进行进一步的处理，最终输出的BEV特征将作为下一个编码层的输入。通过多层堆叠，最终生成的BEV特征B_t将包含丰富的空间信息，供后续的3D目标检测和地图分割等任务使用。
 
 综上所述，空间交叉注意力的流程是通过对多摄像头视图的特征进行选择性交互和聚合，实现了高效且精确的空间信息提取。这种设计不仅提升了模型的性能，还降低了计算复杂度。
