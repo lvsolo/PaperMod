@@ -1193,9 +1193,9 @@ class DetectionTransformerDecoder(TransformerLayerSequence):
 
 # Head
 
-reg_loss:
+reg_loss:L1 Loss
 
-cls_loss:
+cls_loss:Focal Loss
 
 ## iterative refinement机制:
 
