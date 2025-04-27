@@ -5,6 +5,37 @@ tags: ["paper reading",  "BEV"]
 
 ![1744600521522](image/BEVFormer/1744600521522.png)
 
+# 总览
+
+## 预测的物理量是相对于自车坐标系而言的
+
+从BEVFormer的时空融合机制来看，总体上处理的是运动物体相对于自车的运动。我们可以从以下三个层面来理解：
+
+1. **坐标系对齐逻辑**
+2. **相对运动建模** ：
+
+* 自车运动（平移+旋转）通过CAN总线数据完全补偿
+* 剩余的位置变化即反映物体本身的绝对运动
+* 最终表现为物体与自车之间的相对运动
+
+3. **实际效果示例** ： 假设场景：
+
+* 自车静止，前方车辆以10m/s前移 → 表现为物体正向运动
+* 自车以10m/s前移，前方车辆静止 → 表现为物体反向运动
+* 自车和物体同速同向 → 表现为相对静止
+
+这种设计使得模型能够：
+
+1. 消除自车运动带来的观测偏差
+2. **专注学习物体与自车的相对运动模式**
+3. 更准确预测碰撞风险等关键指标
+
+这种相对运动建模方式与自动驾驶的感知需求高度契合，因为：
+
+* 规划控制更关心物体与自车的相对关系
+* 绝对速度的测量需要依赖其他传感器融合
+* 相对运动模式更利于时序特征对齐
+
 ```python
 @TRANSFORMER_LAYER.register_module()
 class BEVFormerLayer(MyCustomBaseTransformerLayer):
@@ -339,7 +370,72 @@ reference_points_cam, bev_mask = self.point_sampling(
             ref_3d, self.pc_range, kwargs['img_metas']) # ref_3d -> ref_3d_cam, (6, 1, 2500, 4, 2), (6, 1, 2500, 4)
 ```
 
+point_sampling中进行了reference point3D 到图像坐标的投影
 
+```python
+    def point_sampling(self, reference_points, pc_range,  img_metas):
+        # reference_points:(1, 4, 2500, 3), lidar2img: lidar -> ego -> camera -> 内参 -> img
+        lidar2img = []
+        for img_meta in img_metas:
+            lidar2img.append(img_meta['lidar2img'])
+        lidar2img = np.asarray(lidar2img) 
+        lidar2img = reference_points.new_tensor(lidar2img)  # (B, N, 4, 4), (1, 6, 4, 4)
+        reference_points = reference_points.clone()
+
+        # 将归一化参考点恢复到lidar系下的实际位置
+        reference_points[..., 0:1] = reference_points[..., 0:1] * \
+            (pc_range[3] - pc_range[0]) + pc_range[0]
+        reference_points[..., 1:2] = reference_points[..., 1:2] * \
+            (pc_range[4] - pc_range[1]) + pc_range[1]
+        reference_points[..., 2:3] = reference_points[..., 2:3] * \
+            (pc_range[5] - pc_range[2]) + pc_range[2]
+        # ref_3d: (1, 4, 2500, 3)
+
+        reference_points = torch.cat(
+            (reference_points, torch.ones_like(reference_points[..., :1])), -1) # cat: (1, 4, 2500, 1), ref_points: (1, 4, 2500, 4)
+
+        reference_points = reference_points.permute(1, 0, 2, 3) # (1, 4, 2500, 4) -> (4, 1, 2500, 4)
+        D, B, num_query = reference_points.size()[:3] # 4, 1, 2500
+        num_cam = lidar2img.size(1) # 6
+
+        reference_points = reference_points.view(
+            D, B, 1, num_query, 4).repeat(1, 1, num_cam, 1, 1).unsqueeze(-1) # (4, 1, 2500, 4) -> (4, 1, 1, 2500, 4) -> (4, 1, 6, 2500, 4) -> (4, 1, 6, 2500, 4, 1)
+
+        lidar2img = lidar2img.view(
+            1, B, num_cam, 1, 4, 4).repeat(D, 1, 1, num_query, 1, 1) # (1, 6, 4, 4) -> (1, 1, 6, 1, 4, 4) -> (4, 1, 6, 2500, 4, 4)
+  
+        reference_points_cam = torch.matmul(lidar2img.to(torch.float32),
+                                            reference_points.to(torch.float32)).squeeze(-1) # 矩阵乘法, (4, 1, 6, 2500, 4)
+        eps = 1e-5
+
+	# 3D 点到 2D图像坐标的投影的z维度应该是在相机之前的，也就是ref2d[...,2]>0
+        bev_mask = (reference_points_cam[..., 2:3] > eps) # (4, 1, 6, 2500, 1)
+        reference_points_cam = reference_points_cam[..., 0:2] / torch.maximum(
+            reference_points_cam[..., 2:3], torch.ones_like(reference_points_cam[..., 2:3]) * eps) # (4, 1, 6, 2500, 2)
+
+        reference_points_cam[..., 0] /= img_metas[0]['img_shape'][0][1]
+        reference_points_cam[..., 1] /= img_metas[0]['img_shape'][0][0]
+
+        # 用于评判某一 三维坐标点 是否落在了 二维坐标平面上 比例区间(0,1), (4, 1, 6, 2500, 1)
+        bev_mask = (bev_mask & (reference_points_cam[..., 1:2] > 0.0)
+                    & (reference_points_cam[..., 1:2] < 1.0)
+                    & (reference_points_cam[..., 0:1] < 1.0)
+                    & (reference_points_cam[..., 0:1] > 0.0))
+        if digit_version(TORCH_VERSION) >= digit_version('1.8'):
+            bev_mask = torch.nan_to_num(bev_mask) # nan->number, default 0
+        else:
+            bev_mask = bev_mask.new_tensor(
+                np.nan_to_num(bev_mask.cpu().numpy()))
+
+        reference_points_cam = reference_points_cam.permute(2, 1, 3, 0, 4) # (4, 1, 6, 2500, 2) -> (6, 1, 2500, 4, 2)
+        bev_mask = bev_mask.permute(2, 1, 3, 0, 4).squeeze(-1) # (4, 1, 6, 2500, 1) -> (6, 1, 2500, 4, 1) -> (6, 1, 2500, 4)
+
+        return reference_points_cam, bev_mask
+```
+
+ref3D 用于 Spatial cross attention环节；ref2d 用于Temporal self attention环节；
+
+对于ref3d其实在；spatial cross attention环节用的是ref3d_cam也就是3d点在2d图像上的投影坐标
 
 ## Temporal Self-Attention
 
@@ -547,6 +643,75 @@ Temporal self-attention 是一种用于聚合时间信息的机制，主要在 B
                            [[bev_h, bev_w]], device=query.device), # [[50, 50]]
                        level_start_index=torch.tensor([0], device=query.device), # [0]
                        **kwargs)
+   ```
+
+   1. 特征对齐：1）将世界空间中的位移转换为BEV坐标系下的位移,
+
+      translation_length（实际平移距离）
+      → 除以 grid_length（每个网格对应的实际距离）→ 得到网格数量级的平移量
+      → 再除以 bev_h/bev_w → 转换为特征图空间的比例偏移（0-1范围）**归一化**
+
+      **为什么要归一化** ： 这种归一化处理是为了适配后续的Deformable Attention等模块，这些模块的偏移量预测本身就是基于归一化坐标系的（0-1范围）。这样处理可以使不同分辨率的特征图具有相同的偏移量表示方式。
+
+      ```python
+              # obtain rotation angle and shift with ego motion
+              # kwargs['img_metas']: dict_keys(['filename', 'ori_shape', 'img_shape', 'lidar2img', 'pad_shape'\
+              # , 'scale_factor', 'box_mode_3d', 'box_type_3d', 'img_norm_cfg', 'sample_idx', 'prev_idx', \
+              # 'next_idx', 'pts_filename', 'scene_token', 'can_bus', 'prev_bev_exists'])
+              # delta_x: x方向平移，delta_y: y方向平移，ego_angle: 自车行进角度
+              delta_x = np.array([each['can_bus'][0]
+                                 for each in kwargs['img_metas']])
+              delta_y = np.array([each['can_bus'][1]
+                                 for each in kwargs['img_metas']])
+              ego_angle = np.array(
+                  [each['can_bus'][-2] / np.pi * 180 for each in kwargs['img_metas']])
+
+              grid_length_y = grid_length[0] # 2.048 = 102.4 / 50 
+              grid_length_x = grid_length[1] # 2.048
+              #translation_length（实际平移距离）
+      → 除以 grid_length（每个网格对应的实际距离）→ 得到网格数量级的平移量
+      → 再除以 bev_h/bev_w → 转换为特征图空间的比例偏移（0-1范围）
+              translation_length = np.sqrt(delta_x ** 2 + delta_y ** 2) # 平移距离，勾股定理
+              translation_angle = np.arctan2(delta_y, delta_x) / np.pi * 180 # 平移偏差角度，转过的偏航角
+              v  = ego_angle - translation_angle  # BEV下的偏航角
+              shift_y = translation_length * \
+                  np.cos(bev_angle / 180 * np.pi) / grid_length_y / bev_h
+              shift_x = translation_length * \
+                  np.sin(bev_angle / 180 * np.pi) / grid_length_x / bev_w # BEV特征图上的偏移量
+
+              shift_y = shift_y * self.use_shift
+              shift_x = shift_x * self.use_shift # self.use_shift True
+
+              shift = bev_queries.new_tensor(
+                  [shift_x, shift_y]).permute(1, 0)  # xy, bs -> bs, xy # (1, 2)
+
+      ```
+
+      2)pre_bev之前时刻的特征图转正对齐到现在的车辆朝向下：旋转中心为bev 特征图中心，即自车在bev坐标系中的位置；对齐的目的：
+
+      这种时序对齐机制使得BEVFormer能够：
+
+   * 在统一的坐标系下融合时序信息
+   * 避免因车辆转向造成的特征错位
+   * **保持运动物体轨迹的连续性**
+
+   ```python
+
+           if prev_bev is not None: #如果存在历史bev，将其旋转到当前bev朝向
+               if prev_bev.shape[1] == bev_h * bev_w: # (1, 2500, 256) -> (2500, 1, 256)
+                   prev_bev = prev_bev.permute(1, 0, 2)
+               if self.rotate_prev_bev:
+                   for i in range(bs): # 按batch遍历
+                       # num_prev_bev = prev_bev.size(1)
+                       rotation_angle = kwargs['img_metas'][i]['can_bus'][-1] # 角度偏移量
+                       tmp_prev_bev = prev_bev[:, i].reshape(
+                           bev_h, bev_w, -1).permute(2, 0, 1) # (2500, 256) -> (50, 50, 256) -> (256, 50, 50)
+                       tmp_prev_bev = rotate(tmp_prev_bev, rotation_angle,
+                                             center=self.rotate_center) # bev角度对准, (256, 50, 50)
+                       tmp_prev_bev = tmp_prev_bev.permute(1, 2, 0).reshape(
+                           bev_h * bev_w, 1, -1) # (256, 50, 50) -> (50, 50, 256) -> (2500, 1, 256)
+                       prev_bev[:, i] = tmp_prev_bev[:, 0] # 放到prev_bev对应batch index上
+               # prev_bev: (2500, 1, 256)
    ```
 2. **查询生成**：每个 BEV 查询 \( Q_p \) 定位在 BEV 平面上的特定位置 \( p = (x, y) \)，用于查询该位置的特征。这个查询会与历史的 BEV 特征结合，以提取时间信息。
 
@@ -821,6 +986,7 @@ feat_flatten = []
         max_len = max([len(each) for each in indexes]) # index最大长度
 
         # each camera only interacts with its corresponding BEV queries. This step can  greatly save GPU memory.
+	# 每个相机的特则只与自己视野范围内的BEV格子对应的querie进行交互cross attention，从而节约大量gpu资源
         queries_rebatch = query.new_zeros(
             [bs, self.num_cams, max_len, self.embed_dims]) # (1, 6, max_len, 256)
         reference_points_rebatch = reference_points_cam.new_zeros(
@@ -872,9 +1038,231 @@ Spatial cross attention的详细流程主要涉及如何从多摄像头视图中
 1. **输入特征获取**：在每个时间戳t时，我们首先将多摄像头的图像输入到主干网络（如ResNet-101），从而获得不同摄像头视图的特征F_t = {F_i^t}（i=1到N_view），其中N_view是摄像头的总数量，F_i^t表示第i个视图的特征。同时，我们保留前一个时间戳t-1的BEV特征B_{t-1}。
 2. **BEV查询定义**：我们预定义了一组网格形状的可学习参数Q，这些参数用作BEVFormer中的查询。每个查询Q_p与BEV平面中的一个网格单元对应，其位置为p = (x, y)，并负责查询该位置的空间特征。bev_query是从前序的temporal self attention传过来的
 3. **参考点的生成**：对于每个BEV查询Q_p，我们通过一个投影函数P(p, i, j)来获取与之对应的多个参考点。这些参考点是在3D空间中定义的（x, y, z_j），z_j是预定义的一组锚定高度。通过将这些3D参考点投影到不同的2D摄像头视图上，我们可以确定其在每个视图中的位置。
-   reference points 2D/3D的整个计算流程：
+   reference points 2D/3D的整个计算流程，在前述reference point生成计算阶段
 4. **交互过程**：在空间交叉注意力层中，每个BEV查询Q_p只与其在多摄像头视图中的感兴趣区域进行交互。具体来说，使用deformable attention机制，每个BEV查询会与其对应的参考点进行交互，从而提取与该查询相关的空间特征。这种方式降低了计算成本，因为它避免了全局注意力机制的高开销。
 5. **特征聚合**：通过以上步骤，每个BEV查询Q_p从各个摄像头视图中聚合特征，生成一个增强的BEV特征表示。这个过程不仅考虑了空间特征的多样性，还确保了有效的信息聚合。
 6. **输出处理**：经过空间交叉注意力层后，特征被输入到前馈网络中进行进一步的处理，最终输出的BEV特征将作为下一个编码层的输入。通过多层堆叠，最终生成的BEV特征B_t将包含丰富的空间信息，供后续的3D目标检测和地图分割等任务使用。
 
 综上所述，空间交叉注意力的流程是通过对多摄像头视图的特征进行选择性交互和聚合，实现了高效且精确的空间信息提取。这种设计不仅提升了模型的性能，还降低了计算复杂度。
+
+# Decoder
+
+```python
+            decoder=dict(
+                type='DetectionTransformerDecoder',
+                num_layers=6,
+                return_intermediate=True,
+                transformerlayers=dict(
+                    type='DetrTransformerDecoderLayer',
+                    attn_cfgs=[
+                        dict(
+                            type='MultiheadAttention',
+                            embed_dims=_dim_,
+                            num_heads=8,
+                            dropout=0.1),
+                         dict(
+                            type='CustomMSDeformableAttention',
+                            embed_dims=_dim_,
+                            num_levels=1),
+                    ],
+
+                    feedforward_channels=_ffn_dim_,
+                    ffn_dropout=0.1,
+                    operation_order=('self_attn', 'norm', 'cross_attn', 'norm',
+                                     'ffn', 'norm'))))
+```
+
+Decoder 部分中的Deformable  attention中的reference points是通过可学习nn.Embedding经过Linear层得到的
+
+```python
+	query_pos, query = torch.split(
+               object_query_embed, self.embed_dims, dim=1) # (900, 256), (900, 256)
+        query_pos = query_pos.unsqueeze(0).expand(bs, -1, -1) # (900, 256) -> (1, 900, 256) -> (1, 900, 256)
+        query = query.unsqueeze(0).expand(bs, -1, -1) # (900, 256) -> (1, 900, 256) -> (1, 900, 256)
+        reference_points = self.reference_points(query_pos) # 线性层 (1, 900, 256) -> (1, 900, 3)
+        reference_points = reference_points.sigmoid() # sigmoid (1, 900, 3)
+        init_reference_out = reference_points # (1, 900, 3) 参考点
+
+        query = query.permute(1, 0, 2) # (1, 900, 256) -> (900, 1, 256)
+        query_pos = query_pos.permute(1, 0, 2) # (1, 900, 256) -> (900, 1, 256)
+        bev_embed = bev_embed.permute(1, 0, 2) # (1, 2500, 256) -> (2500, 1, 256)
+
+        inter_states, inter_references = self.decoder(
+            query=query, # object query, (900, 1, 256)
+            key=None,
+            value=bev_embed, # (2500, 1, 256)
+            query_pos=query_pos, # (900, 1, 256)
+            reference_points=reference_points, # (1, 900, 3)
+            reg_branches=reg_branches, # 回归
+            cls_branches=cls_branches, # 分类
+            spatial_shapes=torch.tensor([[bev_h, bev_w]], device=query.device), # [[50, 50]]
+            level_start_index=torch.tensor([0], device=query.device), # [0]
+            **kwargs)
+```
+
+return_intermediate=True，那么Decoder会将每一个decoder layer的输出都作为最终输出返回
+
+```python
+
+class DetectionTransformerDecoder(TransformerLayerSequence):
+    """Implements the decoder in DETR3D transformer.
+    Args:
+        return_intermediate (bool): Whether to return intermediate outputs.
+        coder_norm_cfg (dict): Config of last normalization layer. Default：
+            `LN`.
+    """
+
+    def __init__(self, *args, return_intermediate=False, **kwargs):
+        super(DetectionTransformerDecoder, self).__init__(*args, **kwargs)
+        self.return_intermediate = return_intermediate
+        self.fp16_enabled = False
+
+    def forward(self,
+                query,
+                *args,
+                reference_points=None,
+                reg_branches=None,
+                key_padding_mask=None,
+                **kwargs):
+        """Forward function for `Detr3DTransformerDecoder`.
+        Args:
+            query (Tensor): Input query with shape
+                `(num_query, bs, embed_dims)`.
+            reference_points (Tensor): The reference
+                points of offset. has shape
+                (bs, num_query, 4) when as_two_stage,
+                otherwise has shape ((bs, num_query, 2).
+            reg_branch: (obj:`nn.ModuleList`): Used for
+                refining the regression results. Only would
+                be passed when with_box_refine is True,
+                otherwise would be passed a `None`.
+        Returns:
+            Tensor: Results with shape [1, num_query, bs, embed_dims] when
+                return_intermediate is `False`, otherwise it has shape
+                [num_layers, num_query, bs, embed_dims].
+        """
+        output = query # object query, (900, 1, 256)
+        intermediate = []
+        intermediate_reference_points = []
+        for lid, layer in enumerate(self.layers): # 6层 decoder
+            reference_points_input = reference_points[..., :2].unsqueeze(
+                2)  # BS NUM_QUERY NUM_LEVEL 2 (1, 900, 3) -> (1, 900, 2) -> (1, 900, 1, 2) 
+            output = layer(
+                output, # (900, 1, 256)
+                *args,
+                reference_points=reference_points_input, # (1, 900, 1, 2) 
+                key_padding_mask=key_padding_mask, # None
+                **kwargs) # (900, 1, 256) DetrTransformerDecoderLayer
+            output = output.permute(1, 0, 2) # (900, 1, 256) -> (1, 900, 256)
+
+            if reg_branches is not None:三
+                """
+                Sequential(
+                    (0): Linear(in_features=256, out_features=256, bias=True)
+                    (1): ReLU()
+                    (2): Linear(in_features=256, out_features=256, bias=True)
+                    (3): ReLU()
+                    (4): Linear(in_features=256, out_features=10, bias=True)
+                )
+                """
+                tmp = reg_branches[lid](output) # (1, 900, 256) -> (1, 900, 10) 偏移量
+                assert reference_points.shape[-1] == 3
+                # 预测的tmp是偏移量，原始点reference_points + 偏移量tmp = 新坐标
+                new_reference_points = torch.zeros_like(reference_points) # (1, 900, 3)
+                new_reference_points[..., :2] = tmp[
+                    ..., :2] + inverse_sigmoid(reference_points[..., :2]) # 新坐标，前两维+偏移
+                new_reference_points[..., 2:3] = tmp[
+                    ..., 4:5] + inverse_sigmoid(reference_points[..., 2:3]) # 新坐标，第三维+偏移
+
+                new_reference_points = new_reference_points.sigmoid() # sigmoid处理
+
+                reference_points = new_reference_points.detach() # 不参与反向传播
+
+            output = output.permute(1, 0, 2) # (1, 900, 256) -> (900, 1, 256)
+            if self.return_intermediate: # 如果返回中间结果，把中间结果存起来
+                intermediate.append(output)
+                intermediate_reference_points.append(reference_points)
+
+        if self.return_intermediate:
+            return torch.stack(intermediate), torch.stack(
+                intermediate_reference_points) # (6, 900, 1, 256), (6, 1, 900, 3)
+
+        return output, reference_points
+
+```
+
+# Head
+
+reg_loss:
+
+cls_loss:
+
+## iterative refinement机制:
+
+    当返回return_intermediate=True时，会对decoder的每一层的输出都作reg_head和cls_head的loss计算;
+
+    每一个层都会输出该层的初始参考点和经过该层修正后的参考点reference points坐标；
+
+    在计算位置坐标时，使用上一层输出的参考点的位置作为偏移量；
+
+该机制包含三个关键阶段：
+
+1. **参考点传递** ：将前一层Decoder输出的参考点作为当前层的初始参考点
+2. **偏移预测** ：通过当前层的回归分支预测边界框参数的调整量（Δx, Δy, Δz等）
+3. **参数更新** ：将预测的偏移量累积到当前参考点，生成新的精调后参考点
+
+这种设计带来了两个主要优势：
+
+1. **渐进优化** ：每个Decoder层在前一层的基础上进行微调，逐步逼近最终结果
+2. **稳定训练** ：通过sigmoid激活限制调整幅度（代码中的 `tmp[..., 0:2].sigmoid()`），避免梯度爆炸
+
+
+```python
+        bev_embed, hs, init_reference, inter_references = outputs
+        hs = hs.permute(0, 2, 1, 3) # (6, 900, 1, 256) -> (6, 1, 900, 256)
+        outputs_classes = []
+        outputs_coords = []
+        for lvl in range(hs.shape[0]): # 6层都处理
+            if lvl == 0: 
+                reference = init_reference # (1, 900, 3)
+            else:
+                reference = inter_references[lvl - 1] # (1, 900, 3) sigmoid值
+            reference = inverse_sigmoid(reference) # 逆sigmoid
+            outputs_class = self.cls_branches[lvl](hs[lvl]) # (1, 900, 256) -> (1, 900, 10)
+            tmp = self.reg_branches[lvl](hs[lvl]) # (1, 900, 256) -> (1, 900, 10)
+
+            # TODO: check the shape of reference
+            assert reference.shape[-1] == 3
+            # 参考点 + 偏移量
+            tmp[..., 0:2] += reference[..., 0:2]
+            tmp[..., 0:2] = tmp[..., 0:2].sigmoid()
+            tmp[..., 4:5] += reference[..., 2:3]
+            tmp[..., 4:5] = tmp[..., 4:5].sigmoid()
+            # 恢复到lidar坐标
+            tmp[..., 0:1] = (tmp[..., 0:1] * (self.pc_range[3] -
+                             self.pc_range[0]) + self.pc_range[0])
+            tmp[..., 1:2] = (tmp[..., 1:2] * (self.pc_range[4] -
+                             self.pc_range[1]) + self.pc_range[1])
+            tmp[..., 4:5] = (tmp[..., 4:5] * (self.pc_range[5] -
+                             self.pc_range[2]) + self.pc_range[2])
+
+            # TODO: check if using sigmoid
+            outputs_coord = tmp
+            outputs_classes.append(outputs_class) # 将分类预测加入outputs list (1, 900, 10)
+            outputs_coords.append(outputs_coord) # 将回归预测加入outputs list (1, 900, 10)
+
+        outputs_classes = torch.stack(outputs_classes)
+        outputs_coords = torch.stack(outputs_coords)
+
+        outs = {
+            'bev_embed': bev_embed, # (2500, 1, 256)
+            'all_cls_scores': outputs_classes, # (6, 1, 900, num_classes)
+            'all_bbox_preds': outputs_coords, # (6, 1, 900, 10?6?)
+            'enc_cls_scores': None,
+            'enc_bbox_preds': None,
+        }
+```
+
+
+
+##
