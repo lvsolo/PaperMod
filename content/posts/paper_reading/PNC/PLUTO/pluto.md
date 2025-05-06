@@ -262,7 +262,11 @@ valid_mask的作用
 
 ##### 1.1.1.2 static obstacles encoder: $E_O$
 
-FourierEmbedding介绍：TODO
+FourierEmbedding介绍：
+
+我的理解：在针对本身有空间、时间等物理量进行傅里叶编码，得到可学习的类频域编码；同时在更高层面，完成多个类似物理量的相对关系的编码；
+
+以agent shape为例，shape本身是具有空间属性的物理量，因此通过傅里叶变化
 
 ![1746510731683](image/pluto/1746510731683.png)
 
@@ -582,3 +586,22 @@ plt.imshow(esdf)
 图示：
 
 ![1740647282513](image/pluto/1740647282513.png)
+
+
+# III.量产部署问题
+
+## 1.natten neighbourAttention问题；
+
+
+
+## 2.自车速度和heading角不准确；
+
+
+## 3.幽灵车问题；
+
+
+
+## 4.costmap优化
+
+
+## 5.起步困难问题
