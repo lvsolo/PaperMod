@@ -264,6 +264,7 @@ valid_mask的作用
 
 FourierEmbedding介绍：TODO
 
+![1746510731683](image/pluto/1746510731683.png)
 
 two layer mlp:
 
