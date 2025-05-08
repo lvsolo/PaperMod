@@ -41,7 +41,7 @@ graph TB
     pt_aug2 --> aug_pt
     aug_pt --> sampler["sampler:\nif too much data, randomly sampling;\nif not enough, zero padding"]
     sampler --> sampled_feature["shape: D,P,N \nD:number of augmented pt dims \nP:number of pillars of an sample \nN: number of augmented pts in a pillar"]
-    sampled_feature --> PointNet["PointNet:\nConv1X1\n BN \n ReLU \n cross-channelor called channel-wise maxPooling"]
+    sampled_feature --> PointNet["PointNet:\nConv1X1\n BN \n ReLU \n cross-channel or called channel-wise maxPooling"]
     PointNet --> Voxelized_feature["Voxelized_feature:\n shape:C,P"]
     Voxelized_feature --> ppscatter[ppscatter] 
     ppscatter --> pseudo-image["pseudo-image\nshape:C,H,W"]
