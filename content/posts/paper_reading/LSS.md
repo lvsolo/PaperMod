@@ -21,6 +21,10 @@ Lift splat architechture
 
 ![1744361551642](image/LSS/1744361551642.jpg)
 
+借用一张CADDN的图说明frustum到bev的过程，实际上会是一个对**梯形**的立方体进行裁切成**矩形**的过程
+
+![1746682669036](image/LSS/1746682669036.png)
+
 # 2.Code
 
 github.com:nv-tlabs/lift-splat-shoot.git
