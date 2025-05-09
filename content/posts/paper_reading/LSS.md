@@ -25,6 +25,8 @@ Lift splat architechture
 
 ![1746682669036](image/LSS/1746682669036.png)
 
+![1746756430929](image/LSS/1746756430929.png)
+
 # 2.Code
 
 github.com:nv-tlabs/lift-splat-shoot.git

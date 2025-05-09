@@ -1,5 +1,10 @@
 
 
+title: "CenterNet Objects as Points"
+author: "lvsolo"
+date: "2023-04-10"
+tags: ["paper reading", "OD", "Detection", "Anchor Free"]
+
 paper:
 
 [CenterNet](https://readpaper.com/pdf-annotate/note?pdfId=4498420488547753985&noteId=678140303196692480)
