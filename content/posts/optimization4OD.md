@@ -3,17 +3,12 @@ author: "lvsolo"
 date: "2023-01-16"
 tags: ["optimization", "object detection"]
 
-
-
-DETR PETR 
-
-
+DETR PETR
 
 点云数据清理:
 
 1. 2D图像数据过滤3D点云上的标注框
 2. 自适应配置不同类别的总体样本比例的方法:
-
 
 PointPillar:
 
@@ -30,6 +25,8 @@ PointPillar:
    **注意**在SSN的论文中，bbox的shape不是使用的whl，而是使用了chebyshev拟合系数进行的loss计算和预测值回归
 7. 二阶段：先回归出大致的bbox，然后将bbox中点特征分割出来进行分类
 8. **RegNet**作为backbone:
+9. sum pooling trick提高训练速度，与2类似
+10. auxilary loss:anchor based/free head;detr like head
 
 BEVFormer
 
