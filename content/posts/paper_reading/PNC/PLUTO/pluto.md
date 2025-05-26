@@ -587,21 +587,22 @@ plt.imshow(esdf)
 
 ![1740647282513](image/pluto/1740647282513.png)
 
+精度：
+
+| 评估数据集 (val14 抽样 109/1118) | R-score | Collisions | Drivable | driving direction compliance | TTC    | Speed Limit | ego progress along expert route | Progress | Comfort | comments                                                                                             |
+| -------------------------------- | ------- | ---------- | -------- | ---------------------------- | ------ | ----------- | ------------------------------- | -------- | ------- | ---------------------------------------------------------------------------------------------------- |
+| val14 (抽样 109/1118)            | 0.8995  | 0.9817     | 1.0      | 1.0                          | 0.9725 | 0.9931      | 0.8457                          | 0.9725   | 0.8807  | ep5 with rule lv                                                                                     |
+| val14 (抽样 109/1118)            | 0.8993  | 0.9817     | 0.9908   | 0.9954                       | 0.9266 | 0.9946      | 0.8989                          | 0.9908   | 0.8807  | ep17 with rule                                                                                       |
+| val14 (抽样 109/1118)            | 0.9182  | 0.9954     | 1.0      | 0.9954                       | 0.9817 | 0.9945      | 0.8703                          | 0.9817   | 0.8716  | epoch16 (base trained ep5 with 1M aligned with DTPP, incremental train with sampled cache) with rule |
 
 # III.量产部署问题
 
 ## 1.natten neighbourAttention问题；
 
-
-
 ## 2.自车速度和heading角不准确；
-
 
 ## 3.幽灵车问题；
 
-
-
 ## 4.costmap优化
-
 
 ## 5.起步困难问题
