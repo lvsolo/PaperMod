@@ -68,3 +68,8 @@ BEVDet 系列（尤其是 BEVDet4D）引入了  **CenterPoint-style anchor-free 
 | Anchor-free 输出 | 每点只回归一个框，降低冗余               | 降低候选数量    |
 | Top-K 筛选       | 每类置信度排序，保留前 K                 | 加速 NMS 前处理 |
 | 快速 NMS 插件    | TensorRT、ONNX 提供的插件                | 推理部署加速    |
+
+
+改进：BEVDepth
+使用图像像素点对应的雷达点云对可见范围内的图像特征的可学习的深度分布估计进行有监督训练，从而增强了 BEVDet 的深度感知能力。
+![alt text](image/BEVDet/BEVDepth.png)
