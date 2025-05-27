@@ -71,5 +71,6 @@ BEVDet 系列（尤其是 BEVDet4D）引入了  **CenterPoint-style anchor-free 
 
 
 改进：BEVDepth
-使用图像像素点对应的雷达点云对可见范围内的图像特征的可学习的深度分布估计进行有监督训练，从而增强了 BEVDet 的深度感知能力。
+
+添加了DepthNet，使用图像像素点对应的雷达点云对可见范围内的图像特征的可学习的深度分布估计进行有监督训练，从而增强了 BEVDet 的深度感知能力。
 ![alt text](image/BEVDet/BEVDepth.png)
