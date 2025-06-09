@@ -1,6 +1,6 @@
 ---
 title: "PLUTO: Pushing the Limit of Imitation Learning-based Planning for Autonomous Driving"
-date: "2024-01-16"
+date: "2025-01-16"
 author: "lvsolo"
 tags: ["PNC", "Nuplan", "planning", 'paper reading']
 ---
@@ -172,6 +172,8 @@ shape:bs\*R\*8*2
 
 value:
 
+实车gt轨迹到每一条参考线的投影，具体使用了shapely库的投影算法，规则比较奇特。
+
 ### 1.3.agent visualization
 
 bs* min(agent_num, max_agent_num) * len(tracked_object_list)
@@ -246,6 +248,16 @@ valid_mask的作用
 
 #### 1.1.1 Encoder
 
+Fourier Embedding 用在对于position+orientation进行编码的encoder 中，包括静态障碍物、四个encoder的pose embedding.
+
+| module           | Encoder Type                                                                                                                                    |
+| ---------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
+| agents           | NAT+帧间差值输入                                                                                                                                |
+| static obstacles | Fourier Embedding                                                                                                                               |
+| AV 自车          | SDE state dropout encoder                                                                                                                       |
+| map              | pointnet++ like encoder                                                                                                                         |
+| scene encoder    | 1. concat all above encoder+Fourier embedding with global position<br />2. encoder of the attributes of (agents, av, map and static obstacles) |
+
 ##### 1.1.1.1 agent history encoder :$E_A$
 
 1.使用帧间差值作为输入；
@@ -278,9 +290,11 @@ two layer mlp:
 
 ![1740120135660](image/pluto/1740120135660.png)
 
-1.不使用自车历史状态信息，因为可能导致从历史信息中学到捷径。
+steering angle指的是车轮朝向与车辆中轴线方向的夹角
 
-2.使用了SDE:
+1.**不使用自车历史状态信息**，只是用当前时刻状态量，因为可能导致从历史信息中学到捷径。
+
+2.使用了SDE，**模拟了某些情况下自车信息不全的情**况:
 
 ![1740364562355](image/pluto/1740364562355.png)
 
@@ -290,7 +304,7 @@ two layer mlp:
 
 ![1740367312594](image/pluto/1740367312594.png)
 
-1.poluline feature构造：
+1.polyline feature构造：
 
 ![1740377072979](image/pluto/1740377072979.png)
 
@@ -357,6 +371,8 @@ pose embedding:
 $N_L$：learnable queries数量，注意这个是对应longitudinal纵向的区域的，$N_L-1$为对应的参考线被分割成的线段数量， $N_L$为参考线上端点和分割点的个数；
 
 $N_R$：reference lines数量
+
+![](image/pluto/20250609143924.jpg)
 
 1.$Q_0$的生成代码
 

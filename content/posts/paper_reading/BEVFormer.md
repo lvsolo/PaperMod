@@ -213,6 +213,7 @@ class BEVFormerLayer(MyCustomBaseTransformerLayer):
 ![1744686647414](image/BEVFormer/1744686647414.png)
 
 Deformable Attention从上图可以看出，主要是两个东西 :$A_{ij}$和${\delta}p_{ij}$,分别对应Attention weights和sampling offsets，后续每次用到的时候都可以注意这两个是如何得到的
+![deformableAttnInBevformer](image/BEVFormer/20250604155628.png)
 
 ```python
 class MultiScaleDeformableAttnFunction_fp16(Function):
@@ -1072,7 +1073,13 @@ Spatial cross attention的详细流程主要涉及如何从多摄像头视图中
                                      'ffn', 'norm'))))
 ```
 
-Decoder 部分中的Deformable  attention中的reference points是通过可学习nn.Embedding经过Linear层得到的
+Decoder 部分中的Deformable  attention中的reference points是通过可学习nn.Embedding经过Linear层得到的,
+```python
+        sampling_offsets = self.sampling_offsets(query).view(
+            bs, num_query, self.num_heads, self.num_levels, self.num_points, 2)
+        attention_weights = self.attention_weights(query).view(
+            bs, num_query, self.num_heads, self.num_levels * self.num_points)
+```
 
 ```python
 	query_pos, query = torch.split(
@@ -1204,6 +1211,37 @@ cls_loss:Focal Loss
     每一个层都会输出该层的初始参考点和经过该层修正后的参考点reference points坐标；
 
     在计算位置坐标时，使用上一层输出的参考点的位置作为偏移量；
+```python
+           output = output.permute(1, 0, 2) # (900, 1, 256) -> (1, 900, 256)
+
+            if reg_branches is not None:
+                """
+                Sequential(
+                    (0): Linear(in_features=256, out_features=256, bias=True)
+                    (1): ReLU()
+                    (2): Linear(in_features=256, out_features=256, bias=True)
+                    (3): ReLU()
+                    (4): Linear(in_features=256, out_features=10, bias=True)
+                )
+                """
+                tmp = reg_branches[lid](output) # (1, 900, 256) -> (1, 900, 10) 偏移量
+                assert reference_points.shape[-1] == 3
+                # 预测的tmp是偏移量，原始点reference_points + 偏移量tmp = 新坐标
+                new_reference_points = torch.zeros_like(reference_points) # (1, 900, 3)
+                new_reference_points[..., :2] = tmp[
+                    ..., :2] + inverse_sigmoid(reference_points[..., :2]) # 新坐标，前两维+偏移
+                new_reference_points[..., 2:3] = tmp[
+                    ..., 4:5] + inverse_sigmoid(reference_points[..., 2:3]) # 新坐标，第三维+偏移
+
+                new_reference_points = new_reference_points.sigmoid() # sigmoid处理
+
+                reference_points = new_reference_points.detach() # 不参与反向传播
+
+            output = output.permute(1, 0, 2) # (1, 900, 256) -> (900, 1, 256)
+            if self.return_intermediate: # 如果返回中间结果，把中间结果存起来
+                intermediate.append(output)
+                intermediate_reference_points.append(reference_points)
+```
 
 该机制包含三个关键阶段：
 
@@ -1295,3 +1333,7 @@ cls_loss:Focal Loss
 | 6 | 4+ hybrid match        | 0.5    | 46.7 | 34.9 | 87.24    | 39.99    |
 | 7 | 5+ convFFN             | 1      | 50.6 | 39.9 | 170.05   | 72.61    |
 | 8 | 6+ convFFN             | 0.5    | 48.7 | 36.7 | 87.24    | 39.99    |
+
+
+## BEVFormer++
+https://readpaper.com/pdf-annotate/note?pdfId=698758911174397952&noteId=1736199981780511232

@@ -21,7 +21,7 @@ PointPillar:
    1. 按shape大小分组+Group head，每个单独的头对每个大小相近的组进行分类
    2. 对每个组的样本的数量进行平衡
 5. Dynamic IoU Assignment:YOLOv8 动态匹配机制，
-6. SSN：点云-->三视图-->凸包convex hull-->转化为(角度,半径)的形式-->chebyshev拟合系数-->三视图系数concat-->用于回归box的shape，可以反推出bbox的立方体形式的shape
+6. 实际用不了，太复杂，需要用查表法。SSN：点云-->三视图-->凸包convex hull-->转化为(角度,半径)的形式-->chebyshev拟合系数-->三视图系数concat-->用于回归box的shape，可以反推出bbox的立方体形式的shape
    **注意**在SSN的论文中，bbox的shape不是使用的whl，而是使用了chebyshev拟合系数进行的loss计算和预测值回归
 7. 二阶段：先回归出大致的bbox，然后将bbox中点特征分割出来进行分类
 8. **RegNet**作为backbone:
