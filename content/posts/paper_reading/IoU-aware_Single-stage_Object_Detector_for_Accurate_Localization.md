@@ -30,3 +30,4 @@ IoU预测头与分类头和回归头联合训练。
 
 IoU预测头的gt（ground truth）是目标IoU（ÎoU i），它是通过计算回归的正样本框（b i）与对应的ground truth框之间的IoU来得到的。具体来说，目标IoU是预测框与ground truth框之间的交并比（IoU），用于在训练过程中作为IoU预测头的监督信号。
 这个gt（目标IoU）是一直在变化的。在每个iteration中，网络会根据当前的预测值生成预测框，然后计算这些预测框与ground truth框之间的IoU，这个IoU值会被用作IoU预测头的gt（目标IoU）。具体来说，目标IoU是通过计算回归的正样本框（b i）与对应的ground truth框之间的IoU来得到的，这个值会在训练过程中作为IoU预测头的监督信号，帮助网络学习如何更准确地预测IoU。
+

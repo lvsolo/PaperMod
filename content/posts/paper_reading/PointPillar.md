@@ -70,6 +70,32 @@ It seems that the origin network differs the Vehicle detection and pedestrian/cy
 
 ![Image](image/point_pillar/2024-01-19_16-12.png)
 
+角度loss的计算在实际代码中可以有add_sin_difference与否的选择，可以选择loss直接等于角度弧度差值或者是在弧度差值上加上sin，之后再加上是smoothL1Loss
+
+```python
+
+def add_sin_difference(boxes1, boxes2):
+    rad_pred_encoding = torch.sin(boxes1[..., -1:]) * torch.cos(boxes2[..., -1:])
+    rad_tg_encoding = torch.cos(boxes1[..., -1:]) * torch.sin(boxes2[..., -1:])
+    boxes1 = torch.cat([boxes1[..., :-1], rad_pred_encoding], dim=-1)
+    boxes2 = torch.cat([boxes2[..., :-1], rad_tg_encoding], dim=-1)
+    return boxes1, boxes2
+
+if self.encode_rad:
+    # sin(a - b) = sinacosb-cosasinb
+    # This will update box_preds and reg_targets!
+    box_preds, reg_targets = add_sin_difference(box_preds, reg_targets)
+
+diff = prediction_tensor[:,:,6] - target_tensor[:,:,6]
+if self._code_weights is not None:
+    code_weights = self._code_weights.type_as(prediction_tensor)
+    diff = code_weights.view(1, 1, -1)[:,:,6] * diff
+abs_diff = torch.abs(diff)
+abs_diff_lt_1 = torch.le(abs_diff, 1 / (self._sigma**2)).type_as(abs_diff)
+loss = abs_diff_lt_1 * 0.5 * torch.pow(abs_diff * self._sigma, 2) + 
+       (abs_diff - 0.5 / (self._sigma**2)) * (1.0 - abs_diff_lt_1)
+```
+
 ## 3.3 Data Augmentation
 
 ![Image](image/point_pillar/2024-01-19_16-29.png)
@@ -82,3 +108,11 @@ It seems that the origin network differs the Vehicle detection and pedestrian/cy
 
 ![Image](image/point_pillar/2024-01-19_16-41.png)
 6. remove per box data augmentation which were used in VoxelNet and SECOND.
+
+# 4.实际部署模型结构
+
+![1749798599377](image/PointPillar/1749798599377.png)
+
+优化后
+
+![1749798514421](image/PointPillar/1749798514421.png)

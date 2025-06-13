@@ -149,7 +149,7 @@ CIoULoss
 
 SIoULoss
 
-EIoULoss
+ EIoULoss
 
 Luxury IoU Loss:
 

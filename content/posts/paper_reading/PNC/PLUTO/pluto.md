@@ -248,7 +248,7 @@ valid_mask的作用
 
 #### 1.1.1 Encoder
 
-Fourier Embedding 用在对于position+orientation进行编码的encoder 中，包括静态障碍物、四个encoder的pose embedding.
+Fourier Embedding 用在对于position+orientation进行编码的encoder 中，包括静态障碍物、四个encoder的pose embedding.`
 
 | module           | Encoder Type                                                                                                                                    |
 | ---------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -388,9 +388,13 @@ $N_R$：reference lines数量
 
 learnable queries $Q_{lon}$:$N_L$X$D$
 
-通过concat+mlp生成的$Q_0$:$N_R$X$N_L$X$D$
+将$Q_{lat}$在Mode维度repeat num_modes次，将$Q_{lon}$在reference lines维度repeate num_reference_line 次
 
-对$Q_0$直接使用自注意力，复杂度为$N_R^2$$N_L^2$,使用分解后的方式，分别计算第一维和第二维的自注意力，降低复杂度
+通过在相同的D维度上concat $Q_{lat}$和$Q_{lon}$得到$N_R*N_L*2D$的向量
+
+mlp的linear shape是(2D, D)生成的$Q_0$:$N_R$X$N_L$X$D$
+
+对$Q_0$直接使用自注意力，复杂度为$N_R^2$$N_L^2$,使用分解后的方式，分别计算第一维和第二维的自注意力，降低复杂度降低为$N_R^2*N_L+N_L^2*N_R$
 
 ![1740465717997](image/pluto/1740465717997.png)
 
