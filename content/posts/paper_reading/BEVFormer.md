@@ -215,6 +215,10 @@ class BEVFormerLayer(MyCustomBaseTransformerLayer):
 Deformable Attention从上图可以看出，主要是两个东西 :$A_{ij}$和${\delta}p_{ij}$,分别对应Attention weights和sampling offsets，后续每次用到的时候都可以注意这两个是如何得到的
 ![deformableAttnInBevformer](image/BEVFormer/20250604155628.png)
 
+![1750146238190](image/BEVFormer/1750146238190.png)
+
+所以由于DeformAttn的这种性质，在每一个BEV的grid中，其实只采样了四个像素点（插值后），然后就得到了BEV在这个grid中的信息，所以是很稀疏化的特征（尤其是与BEVDet系列的BEVPooling形式的操作相比），然后有了后续的SparseBEV的改进。关于BEVFormer系列的**特征稀疏性问题**后续会讨论。
+
 ```python
 class MultiScaleDeformableAttnFunction_fp16(Function):
 
@@ -978,7 +982,7 @@ feat_flatten = []
 
         bs, num_query, _ = query.size() # 1, 2500, 256
 
-        D = reference_points_cam.size(3) # (6, 1, 2500, 4, 2), D=4
+        D = reference_points_cam. size(3) # (6, 1, 2500, 4, 2), D=4
         indexes = []
         for i, mask_per_img in enumerate(bev_mask): # bev_mask: (6, 1, 2500, 4)
             # mask_per_img: (1, 2500, 4) 单相机mask
@@ -1074,6 +1078,7 @@ Spatial cross attention的详细流程主要涉及如何从多摄像头视图中
 ```
 
 Decoder 部分中的Deformable  attention中的reference points是通过可学习nn.Embedding经过Linear层得到的,
+
 ```python
         sampling_offsets = self.sampling_offsets(query).view(
             bs, num_query, self.num_heads, self.num_levels, self.num_points, 2)
@@ -1211,6 +1216,7 @@ cls_loss:Focal Loss
     每一个层都会输出该层的初始参考点和经过该层修正后的参考点reference points坐标；
 
     在计算位置坐标时，使用上一层输出的参考点的位置作为偏移量；
+
 ```python
            output = output.permute(1, 0, 2) # (900, 1, 256) -> (1, 900, 256)
 
@@ -1321,8 +1327,6 @@ cls_loss:Focal Loss
 
 ## ConvFFN
 
-
-
 | # | Model Variant          | insize | NDS  | mAP  | fp32(ms) | fp16(ms) |
 | - | ---------------------- | ------ | ---- | ---- | -------- | -------- |
 | 1 | origin base            | 1      | 51.7 | 41.6 | 362.78   |          |
@@ -1334,6 +1338,13 @@ cls_loss:Focal Loss
 | 7 | 5+ convFFN             | 1      | 50.6 | 39.9 | 170.05   | 72.61    |
 | 8 | 6+ convFFN             | 0.5    | 48.7 | 36.7 | 87.24    | 39.99    |
 
-
 ## BEVFormer++
+
 https://readpaper.com/pdf-annotate/note?pdfId=698758911174397952&noteId=1736199981780511232
+
+
+# 缺陷
+
+采样点重合的问题：
+
+特征的稀疏性问题：SparseBEV
