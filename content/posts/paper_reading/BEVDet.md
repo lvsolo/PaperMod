@@ -9,11 +9,7 @@ tags: ["paper reading",  "BEV"]
 
 ## I.LSS view transformer + CenterPoint Head
 
-
-
 ## II.data augmentation in BEV coord
-
-
 
 ## III.简化NMS
 
@@ -69,6 +65,9 @@ BEVDet 系列（尤其是 BEVDet4D）引入了  **CenterPoint-style anchor-free 
 | Top-K 筛选       | 每类置信度排序，保留前 K                 | 加速 NMS 前处理 |
 | 快速 NMS 插件    | TensorRT、ONNX 提供的插件                | 推理部署加速    |
 
+改进：BEVDET4D
+
+![1751250965648](image/BEVDet/1751250965648.png)
 
 改进：BEVDepth
 
