@@ -3,6 +3,8 @@ title: "Sparse4D Series"
 author: "lvsolo"
 date: "2025-06-07"
 tags: ["paper reading", "3D Detection", "Sparse Perception"]
+ShowToc: true
+TocOpen: true
 ---
 
 # 论文信息
@@ -912,16 +914,336 @@ def update(self, instance_feature, anchor, confidence):
 ![Sparse4D v3 完整 Pipeline 各章节对应位置](image/Sparse4D/sparse4dv3_full_pipeline_sections.png)
 
 > **图注**: Sparse4D v3 完整 pipeline，每个章节编号直接标注在对应的模块上:
-> - **§3.3 Anchor Embedding Encoder**: 11维 anchor → 4组 MLP → concat → 256d (mode="cat")
-> - **§3.4 Decoupled Attention**: Temporal Attention (时序交叉) + Self-Attention (帧内)，Q=K=FC([F,E])
-> - **§3.5 Temporal Instance Denoising**: 对 GT 加噪声实例注入训练，λ_dn=5.0 (仅训练时)
-> - **§3.6 Quality Estimation**: Centerness + Yawness 辅助监督，推理时 final_score=cls×σ(C)
-> - **§3.7 End-to-End Tracking**: ID 分配 + InstanceBank 传播 (沿用 v2 的递归框架)
+> - **§3.3 Temporal Instance Denoising**: 对 GT 加噪声实例注入训练，λ_dn=5.0 (仅训练时)
+> - **§3.4 Quality Estimation**: Centerness + Yawness 辅助监督，推理时 final_score=cls×σ(C)
+> - **§3.5 Decoupled Attention** (含 Anchor Embedding Encoder): Temporal Attention (时序交叉) + Self-Attention (帧内)，Q=K=FC([F,E])；Anchor Encoder: 11维 anchor → 4组 MLP → concat → 256d (mode="cat")
+> - **§3.6 End-to-End Tracking**: ID 分配 + InstanceBank 传播 (沿用 v2 的递归框架)
 > - 灰色模块为 v2 沿用 (§2.4 EDA + §2.5 Camera Encoding + §2.7 Instance Propagation)
 
-## 3.3 Anchor Embedding Encoder (Anchor 编码器)
+## 3.3 Temporal Instance Denoising (TID)
 
-<!-- TODO: 补充你对 Anchor Embedding Encoder 的理解 -->
+![Temporal Instance Denoising](image/Sparse4D/v3_temporal_denoising.png)
+
+> **图注 (Figure 4)**: Temporal Instance Denoising 示意图。
+> - **训练阶段**: 在输入实例中加入带噪声的 GT 实例 (位置扰动)，要求模型将其去噪回原始 GT 位置
+> - **正负样本判定**: 正噪声和负噪声 anchor **混在一起**，通过匈牙利匹配 (而非噪声范围) 确定正负样本
+> - **Attention Mask**: 可学习实例与去噪实例之间、不同去噪组之间均有注意力屏蔽，防止信息泄露 (详见下方)
+> - **推理阶段**: 不添加噪声实例，正常推理
+
+### 核心公式
+
+**GT anchors:**
+
+$$A^{gt} = \{(x, y, z, w, l, h, \text{yaw}, v_x, v_y, v_z)_i \mid i \in \mathbb{Z}_N\}$$
+
+**带噪声 anchors** (对每个 GT 添加 $M$ 组噪声，每组含正负样本):
+
+$$A^{noise} = \{A_i + \Delta A_{i,j,k} \mid i \in \mathbb{Z}_N, \, j \in \mathbb{Z}_M, \, k \in \mathbb{Z}_2\}$$
+
+> 其中 $\Delta A_{i,j,1} \sim U(-x, x)$ (小噪声)，$\Delta A_{i,j,2} \sim U(-2x, -x) \cup (x, 2x)$ (大噪声)。注意：这里的"小噪声"和"大噪声"**并不直接决定**正负样本——最终正负样本通过匈牙利匹配确定，而非噪声范围。DINO-DETR 用噪声范围直接判定，Sparse4D v3 改进了这一点。
+> 这里的 $x = \text{dn\_noise\_scale} = 0.5$，是一个**固定的标量超参数**，对所有 anchor 维度 (位置/尺寸/朝向/速度) 统一生效，而非 GT 某个维度的值。
+> 噪声加在**编码后的 GT** 上：位置保持原值，尺寸取对数，朝向转为 sin/cos，然后统一加 $U(-0.5, 0.5)$ 的噪声。
+
+### 正负样本的判定: 两个独立的匈牙利匹配池
+
+> ⚠️ **核心要点**: 训练中有**两个完全独立的匈牙利匹配过程**，互不关联。
+
+**匹配池 1: 去噪实例** (在 `get_dn_anchors()` 中，decoder 之前执行)
+
+将正噪声 anchor 和负噪声 anchor **混在一起**，通过 `linear_sum_assignment` 跟 GT 做二分图匹配。匹配到的 = 正样本 (赋予 GT 标签)，未匹配到的 = 负样本。
+
+```python
+# target.py: get_dn_anchors()
+dn_anchor = box_target + noise                    # 正噪声
+if self.add_neg_dn:
+    dn_anchor = torch.cat([dn_anchor, box_target + noise_neg], dim=1)  # 正负混在一起
+
+box_cost = self._box_cost(dn_anchor, box_target, ...)
+for i in range(bs):
+    anchor_idx, gt_idx = linear_sum_assignment(cost)  # 匈牙利匹配
+    dn_box_target[i, anchor_idx] = box_target[i, gt_idx]  # 匹配到的=正样本
+    dn_cls_target[i, anchor_idx] = cls_target[i, gt_idx]
+    # 没匹配到的保持 dn_cls_target = -1，即负样本
+```
+
+**匹配池 2: 可学习实例** (在 `sample()` 中，decoder 之后执行)
+
+可学习实例经过 decoder 后产生预测结果，在 `loss()` 中调用 `sample()` 用匈牙利匹配将预测与 GT 配对。去噪实例**不参与**这个匹配。
+
+```python
+# sparse4d_head.py: loss()
+cls_target, reg_target, reg_weights = self.sampler.sample(
+    cls, reg, data["gt_labels_3d"], data["gt_bboxes_3d"])
+# sample() 内部也用 linear_sum_assignment，但只对可学习实例的预测
+```
+
+```
+匹配池 1 (get_dn_anchors)              匹配池 2 (sample)
+──────────────────────────              ──────────────────────────
+正噪声 anchor ─┐                        可学习实例预测 ──→ 匈牙利匹配 ──→ cls_target, reg_target
+               ├─→ 匈牙利匹配 ──→ dn_cls_target, dn_reg_target
+负噪声 anchor ─┘
+                                        (两个匹配池完全独立，互不干扰)
+```
+
+#### 与 DINO-DETR 的关键区别
+
+> DINO-DETR **凭噪声范围直接判定**正负样本 ($(-x,x)$ 内 = 正，之外 = 负)。但这存在误判风险：负样本的噪声虽然在**整体幅度**上更大，但 anchor 有 9+ 个维度 (xyz, w, l, h, yaw, vx, vy, vz)，负样本在**某些维度**上可能比正样本更接近 GT。直接按范围判定会产生错误分配。
+>
+> Sparse4D v3 的改进：不管噪声大小，统一通过匈牙利匹配让**空间距离**来决定谁是正样本、谁是负样本，彻底消除歧义。
+
+### 注意力掩码 (Attention Mask): 三级隔离
+
+> **核心规则**: 可学习实例与去噪实例之间**不能交互**，不同去噪组之间也**不能交互**，只有同组内的去噪实例可以交互。
+
+代码中的注意力掩码分为两层构建：
+
+**第一层**: `get_dn_anchors()` 中构建组内掩码 (`dn_attn_mask`)
+
+```python
+# 只有同组内可以互相关注
+attn_mask = new_ones(num_gt * num_dn_groups, num_gt * num_dn_groups)  # 全部 blocked
+for i in range(num_dn_groups):
+    start = num_gt * i
+    end = start + num_gt
+    attn_mask[start:end, start:end] = 0  # 同组内 unblock → 允许关注
+attn_mask = (attn_mask == 1)  # True = blocked, False = allowed
+```
+
+**第二层**: `forward()` 中构建全局掩码 (可学习实例 + 去噪实例)
+
+```python
+num_instance = num_free_instance + num_dn_anchor
+attn_mask = new_ones(num_instance, num_instance)          # 全部 blocked
+attn_mask[:num_free_instance, :num_free_instance] = False # 可学习实例之间: 允许
+attn_mask[num_free_instance:, num_free_instance:] = dn_attn_mask  # 去噪实例之间: 用组内掩码
+# 其余位置保持 True (blocked):
+#   - 可学习实例 → 去噪实例: blocked ✗
+#   - 去噪实例 → 可学习实例: blocked ✗
+```
+
+**可视化** (以 900 可学习实例 + 5 组去噪为例):
+
+```
+                     可学习(900)    组1    组2    组3    组4    组5
+                 ┌──────────────┬─────┬─────┬─────┬─────┬─────┐
+  可学习(900)    │  ✅ 可以交互  │  ✗  │  ✗  │  ✗  │  ✗  │  ✗  │
+                 ├──────────────┼─────┼─────┼─────┼─────┼─────┤
+  组1            │  ✗           │ ✅内 │  ✗  │  ✗  │  ✗  │  ✗  │
+                 ├──────────────┼─────┼─────┼─────┼─────┼─────┤
+  组2            │  ✗           │  ✗  │ ✅内 │  ✗  │  ✗  │  ✗  │
+                 ├──────────────┼─────┼─────┼─────┼─────┼─────┤
+  组3            │  ✗           │  ✗  │  ✗  │ ✅内 │  ✗  │  ✗  │
+                 ├──────────────┼─────┼─────┼─────┼─────┼─────┤
+  组4            │  ✗           │  ✗  │  ✗  │  ✗  │ ✅内 │  ✗  │
+                 ├──────────────┼─────┼─────┼─────┼─────┼─────┤
+  组5            │  ✗           │  ✗  │  ✗  │  ✗  │  ✗  │ ✅内 │
+                 └──────────────┴─────┴─────┴─────┴─────┴─────┘
+```
+
+> **为什么需要隔离？**
+>
+> 1. **可学习实例 ↔ 去噪实例隔离**: 去噪实例的 anchor 来自 GT + 噪声，如果可学习实例能关注到去噪实例，就等于**泄露了 GT 信息**。可学习实例应该自己学会找到物体，不能"抄答案"。
+>
+> 2. **不同去噪组之间隔离**: 每个组独立进行匈牙利匹配，一个组内的一个 GT 最多匹配一个正样本。如果组间可以交互，信息会跨组传播，破坏"每组独立匹配"的约束，可能导致歧义（同一个 GT 被多个组的正样本互相确认）。
+>
+> 3. **同组内允许交互**: 同一组的去噪实例需要通过 self-attention 互相交换信息，才能更好地理解周围的上下文，从而更准确地"去噪"。这与 DN-DETR 的设计一致。
+
+### 去噪实例的构造细节
+
+> **关键结论: 去噪 anchor = 原始 GT 标注 + 噪声，不是 decoder 中间层的输出加噪声。**
+
+整个执行时间线：
+
+```
+① 数据集提供: GT box annotations (原始标注，没经过任何 decoder)
+          ↓
+② get_dn_anchors(): 对原始 GT 编码后直接加噪声 (在 decoder 之前!)
+   dn_anchor = encode(GT) + noise
+   dn_instance_feature = zeros(256d)
+          ↓
+③ forward(): 把 [可学习实例] + [去噪实例] concat 在一起
+   anchor   = [learnable_anchor,  dn_anchor]
+   feature  = [learnable_feature, zeros]
+          ↓
+④ 一起走完所有 6 层 Decoder
+   → 可学习实例: 被精修成检测结果
+   → 去噪实例: 被精修，目标是还原回 GT
+          ↓
+⑤ loss():
+   匹配池 2: 可学习实例预测 → sample() → 普通检测 loss
+   匹配池 1: 去噪实例的 dn_cls_target/dn_reg_target (已在②确定) → 去噪 loss
+```
+
+| 组件 | 可学习实例 | 去噪实例 |
+|------|-----------|---------|
+| **Anchor 来源** | K-means 初始化 / 上一帧传播 | **原始 GT 标注 + 噪声** |
+| **Instance Feature** | 可学习参数 / 传播来的 | **全零** (`new_zeros`) |
+| **Decoder 处理** | 从头走完 6 层 | 同左，一起走完 6 层 |
+| **匈牙利匹配** | `sample()` — 预测 vs GT | `get_dn_anchors()` — 噪声 anchor vs GT |
+| **匹配池** | 只有可学习实例 | 只有去噪实例 |
+| **Loss** | Focal Loss (分类) + Smooth L1 (回归) | 同左 (Focal Loss + Smooth L1) |
+
+> 设计直觉: 给模型一个"在 GT 附近但有偏移"的几何起点和**空白的语义特征**，让模型通过 decoder 学会从图像中采样特征并把位置"修"回 GT。Instance feature 如果有内容就是信息泄露。
+
+### Loss 的本质: 去噪自编码器，不是对比学习
+
+去噪 loss 的形式与普通检测 loss **完全相同** (Focal Loss + Smooth L1 Loss)，不是对比学习 loss。
+
+| | 对比学习 (InfoNCE) | Sparse4D v3 去噪 Loss |
+|---|---|---|
+| **公式** | $-\log\frac{\exp(q \cdot k^+ / \tau)}{\exp(q \cdot k^+ / \tau) + \sum \exp(q \cdot k^-_j / \tau)}$ | Focal Loss (分类) + Smooth L1 (回归) |
+| **正负交互** | 正样本在分子，所有样本在分母，显式对比 | 正负样本**各算各的**，没有显式对比 |
+| **优化目标** | 拉近正对、推远负对 | 正样本: 回归到 GT + 预测正确类别; 负样本: 预测为背景 |
+
+> 虽然"区分正负样本"的思想有对比学习的味道，但数学上不是一回事。更准确地说是**去噪自编码器 (Denoising Autoencoder)** 的思路：给模型一个带噪声的输入，让它学会还原到干净的 GT。
+
+### 核心思路
+
+- 灵感来自 DN-DETR，但扩展到 3D 时序检测场景
+- 提供密集监督信号，稳定匈牙利匹配的训练过程
+- 时序去噪实例: 从上一帧 GT 出发加噪声 → 传播到当前帧 → 要求去噪回当前帧 GT
+- 特别有助于时序分支，教会模型正确处理实例传播
+- 配置: `num_dn_groups=5` (5组噪声实例), `num_temp_dn_groups=3` (其中3组做时序传播), `dn_noise_scale=0.5`, `dn_loss_weight=5.0`
+
+## 3.4 Quality Estimation
+
+<!-- TODO: 补充你对 Quality Estimation 的理解 -->
+
+分类置信度不能准确反映检测框质量。v3 引入两个质量指标作为辅助监督：
+
+### Centerness (中心度)
+
+$$C_{\text{gt}} = \exp\big(-\|[x, y, z]_{\text{pred}} - [x, y, z]_{\text{gt}}\|_2\big)$$
+
+> **连续值**，范围 $(0, 1]$。用当前**预测框中心**与**GT中心**的欧氏距离计算。
+> - 重合 → $d=0$ → $C_{\text{gt}}=1$
+> - 偏离 1m → $C_{\text{gt}}≈0.37$
+> - 偏离越远 → $C_{\text{gt}}→0$
+>
+> ⚠️ 论文写 $\exp(-\|\Delta\|^2)$，代码实际用 `torch.norm(p=2)` 即 $\exp(-\|\Delta\|_2)$，以代码为准。
+>
+> **关键**: 不同 decoder 层的预测不同 → 每层 centerness GT 也不同，形成"你这个预测定位有多准"的自适应监督。
+
+### Yawness (朝向度)
+
+**论文公式** (Eq.4，连续值):
+
+$$Y = [\sin\text{yaw}, \cos\text{yaw}]_{\text{pred}} \cdot [\sin\text{yaw}, \cos\text{yaw}]_{\text{gt}} = \cos(\Delta\text{yaw})$$
+
+> 两个单位向量的点积 = $\cos(\Delta\text{yaw})$，范围 $[-1, 1]$，**论文给的是连续值**。
+
+**代码实现** (二值化简化):
+
+```python
+yns_target = (cosine_similarity(...) > 0).float()  # cos>0 → 1.0, cos≤0 → 0.0
+```
+
+> ⚠️ **论文与代码有差异**: 论文公式是连续的 $\cos(\Delta\text{yaw})$，但代码用 `> 0` 截断成了 **0/1 二值**。以代码为准:
+> - 朝向差 < 90° → $Y_{\text{gt}}=1$
+> - 朝向差 ≥ 90° → $Y_{\text{gt}}=0$
+
+### 正负样本的 GT 设置 (实操细节)
+
+<!-- TODO: 补充你对正负样本 GT 设置的理解 -->
+
+**核心代码** (来源: `projects/mmdet3d_plugin/models/detection3d/losses.py`):
+
+```python
+# quality 网络输出: quality[..., CNS] = centerness logits, quality[..., YNS] = yawness logits
+cns = quality[..., CNS]                     # centerness 预测值 (logits)
+yns = quality[..., YNS].sigmoid()           # yawness 预测值 (sigmoid 后)
+
+# ---- 只对正样本 (mask=True) 计算 quality loss ----
+# mask 来自匈牙利匹配: 匹配到 GT 的是正样本, 未匹配的是负样本
+# 代码中: qt = qt.flatten(end_dim=1)[mask]  只取正样本的 quality 预测
+
+# Centerness GT: 用预测框和 GT 框的中心点距离计算
+cns_target = torch.norm(
+    box_target[..., [X, Y, Z]] - box[..., [X, Y, Z]], p=2, dim=-1
+)                       # || pred_center - gt_center ||_2
+cns_target = torch.exp(-cns_target)  # exp(-distance) → 越近越接近1
+
+# Yawness GT: 判断预测朝向与GT朝向的cos相似度是否 > 0 (二值)
+yns_target = (
+    torch.nn.functional.cosine_similarity(
+        box_target[..., [SIN_YAW, COS_YAW]],
+        box[..., [SIN_YAW, COS_YAW]],
+        dim=-1,
+    ) > 0
+).float()               # 朝向一致 → 1.0, 朝向相反 → 0.0
+```
+
+**总结:**
+
+| | 正样本 (匹配到 GT) | 负样本 (未匹配到 GT) |
+|---|---|---|
+| **Centerness GT** | $C_{\text{gt}} = \exp(-\|[x,y,z]_{\text{pred}} - [x,y,z]_{\text{gt}}\|_2^2)$, 连续值 ∈ (0, 1] | **不参与计算** (被 mask 过滤掉) |
+| **Yawness GT** | 论文: $\cos(\Delta\text{yaw})$ 连续值; 代码: `>0` 二值化后 {0, 1} | **不参与计算** (被 mask 过滤掉) |
+| **网络预测** | $C_{\text{pred}}$ (logit), $Y_{\text{pred}}$ (sigmoid 后) | 输出但被 mask 忽略 |
+
+> **注意**: Quality Estimation 的 loss **只对正样本计算**。负样本通过 `mask` 过滤掉，不产生 centerness/yawness 损失。
+
+> **特殊处理**: nuScenes 中某些类别 (如 barrier) 不区分正反方向，代码中 `cls_allow_reverse` 会对这些类别的 GT yaw 做翻转对齐，确保 yawness 判断正确。
+
+### Quality Estimation 损失
+
+$$\mathcal{L} = \lambda_1 \text{CrossEntropy}(Y_{\text{pred}}, Y_{\text{gt}}) + \lambda_2 \text{GaussianFocal}(C_{\text{pred}}, C_{\text{gt}})$$
+
+> Centerness 用 BCE with Sigmoid (`CrossEntropyLoss, use_sigmoid=True`)，Yawness 用 Gaussian Focal Loss (`GaussianFocalLoss`)。**仅对正样本**计算。
+
+### 推理时怎么用 Quality?
+
+```python
+# 推理时: 最终得分 = 分类置信度 × centerness_sigmoid
+centerness = quality[output_idx][..., CNS]
+cls_scores *= centerness.sigmoid()    # 乘以 centerness 作为最终排序分数
+```
+
+> 即 `final_score = classification_confidence × sigmoid(centerness_pred)`，centerness 越高的框最终得分越高，低质量的框被压低分数后过滤掉。yawness 不参与推理评分，仅在训练时提供辅助监督。
+
+## 3.5 Decoupled Attention (解耦注意力)
+
+![Decoupled Attention Architecture](image/Sparse4D/v3_decoupled_attention.png)
+
+> **图注 (Figure 5)**: Anchor Encoder 和 Attention 架构。左侧为 Anchor Embedding Encoder（将 anchor 参数编码为位置编码），右侧将 v2 中统一的注意力操作解耦为:
+> - **Temporal Self-Attention**: 当前帧实例与上一帧传播实例之间的注意力 (instance-to-instance)
+> - **Cross-Attention (Deformable Aggregation)**: 实例与多视图图像特征之间的交叉注意力 (instance-to-image)
+>
+> ⚠️ **术语说明**: 论文将第一个分支称为 "Self-Attention"（与 instance-to-image 的 Cross-Attention 相对），但实际代码中 `temp_gnn` 的 **Q 和 K/V 不同源** — Q 来自当前帧 900 个实例，K/V 来自上一帧原始的 600 个时序实例，属于**交叉注意力机制**。论文用 "Self" 是强调 "实例与实例之间"（而非实例与图像之间），并非标准意义上的自注意力 (Self-Attention where Q=K=V)。
+
+<!-- TODO: 补充你对解耦注意力的理解 -->
+
+### Vanilla vs Decoupled 对比
+
+**v2 Vanilla Attention**: anchor embedding $E$ 和 instance feature $F$ 直接**相加**作为 query/key:
+
+$$Q = K = F + E, \quad V = F$$
+
+> 问题: 相加后空间信息和语义信息混合，注意力权重会出现异常值 (Figure 3 中红圈所示的错误关联)
+
+**v3 Decoupled Attention**: $E$ 和 $F$ **拼接**后再投影，空间信息和语义信息独立计算注意力:
+
+$$Q = K = \text{FC}([F, \, E]) \in \mathbb{R}^{N \times 512}, \quad V = F$$
+
+$$\text{Output} = \text{FC}(\text{Attention}(Q, K, V)) \in \mathbb{R}^{N \times 256}$$
+
+> 即将 $F$ (256d) 和 $E$ (256d) concat 成 512d，过全连接层后做注意力计算，再投影回 256d。这给网络更大的灵活性来区分空间关系和语义关系。
+
+### 为什么解耦？
+
+<!-- TODO: 补充你的理解 -->
+- 统一注意力将时序交互和图像特征提取混在一起，各自的学习目标不一致
+- 解耦后各司其职:
+  - 时序注意力 (temp_gnn, 实际为交叉注意力) → 处理当前帧实例与历史帧实例之间的交互 + 时序一致性
+  - 交叉注意力 (Deformable Aggregation) → 处理实例与图像特征的特征提取
+
+![Attention Visualization](image/Sparse4D/v3_attention_visualization.png)
+
+> **图注 (Figure 3)**: Vanilla Attention vs Decoupled Attention 的可视化对比。可以看到解耦后注意力权重更加聚焦和合理。
+
+### Anchor Embedding Encoder (Anchor 编码器)
+
 
 ### 三个版本的 Anchor 构成与 Embedding 演进
 
@@ -1117,177 +1439,7 @@ feature = instance_feature + anchor_embed
 
 **一句话总结**: Anchor Embedding Encoder 本质上就是**最朴素的多层感知机 (MLP)** — 把 anchor 的几何参数从低维物理空间映射到高维特征空间，充当位置编码 (positional encoding) 的角色。没有 attention，没有 deformable，没有复杂结构，就是 `[Linear → ReLU → LayerNorm] × 4层`。和 DETR 里把 (x, y) 坐标过 MLP 生成 positional encoding 是同一个思路，只不过 Sparse4D 的 anchor 参数更丰富 (v3为11维)，所以分组后各自编码再拼起来。
 
----
-
-## 3.4 关键改进: Decoupled Attention (解耦注意力)
-
-![Decoupled Attention Architecture](image/Sparse4D/v3_decoupled_attention.png)
-
-> **图注 (Figure 5)**: Anchor Encoder 和 Attention 架构。左侧为 Anchor Embedding Encoder（将 anchor 参数编码为位置编码），右侧将 v2 中统一的注意力操作解耦为:
-> - **Temporal Self-Attention**: 当前帧实例与上一帧传播实例之间的注意力 (instance-to-instance)
-> - **Cross-Attention (Deformable Aggregation)**: 实例与多视图图像特征之间的交叉注意力 (instance-to-image)
->
-> ⚠️ **术语说明**: 论文将第一个分支称为 "Self-Attention"（与 instance-to-image 的 Cross-Attention 相对），但实际代码中 `temp_gnn` 的 **Q 和 K/V 不同源** — Q 来自当前帧 900 个实例，K/V 来自上一帧原始的 600 个时序实例，属于**交叉注意力机制**。论文用 "Self" 是强调 "实例与实例之间"（而非实例与图像之间），并非标准意义上的自注意力 (Self-Attention where Q=K=V)。
-
-<!-- TODO: 补充你对解耦注意力的理解 -->
-
-### Vanilla vs Decoupled 对比
-
-**v2 Vanilla Attention**: anchor embedding $E$ 和 instance feature $F$ 直接**相加**作为 query/key:
-
-$$Q = K = F + E, \quad V = F$$
-
-> 问题: 相加后空间信息和语义信息混合，注意力权重会出现异常值 (Figure 3 中红圈所示的错误关联)
-
-**v3 Decoupled Attention**: $E$ 和 $F$ **拼接**后再投影，空间信息和语义信息独立计算注意力:
-
-$$Q = K = \text{FC}([F, \, E]) \in \mathbb{R}^{N \times 512}, \quad V = F$$
-
-$$\text{Output} = \text{FC}(\text{Attention}(Q, K, V)) \in \mathbb{R}^{N \times 256}$$
-
-> 即将 $F$ (256d) 和 $E$ (256d) concat 成 512d，过全连接层后做注意力计算，再投影回 256d。这给网络更大的灵活性来区分空间关系和语义关系。
-
-### 为什么解耦？
-
-<!-- TODO: 补充你的理解 -->
-- 统一注意力将时序交互和图像特征提取混在一起，各自的学习目标不一致
-- 解耦后各司其职:
-  - 时序注意力 (temp_gnn, 实际为交叉注意力) → 处理当前帧实例与历史帧实例之间的交互 + 时序一致性
-  - 交叉注意力 (Deformable Aggregation) → 处理实例与图像特征的特征提取
-
-![Attention Visualization](image/Sparse4D/v3_attention_visualization.png)
-
-> **图注 (Figure 3)**: Vanilla Attention vs Decoupled Attention 的可视化对比。可以看到解耦后注意力权重更加聚焦和合理。
-
-## 3.5 关键改进: Temporal Instance Denoising (TID)
-
-![Temporal Instance Denoising](image/Sparse4D/v3_temporal_denoising.png)
-
-> **图注 (Figure 4)**: Temporal Instance Denoising 示意图。
-> - **训练阶段**: 在输入实例中加入带噪声的 GT 实例 (位置扰动)，要求模型将其去噪回原始 GT 位置
-> - **Attention Mask**: 去噪实例与普通实例之间有特定的注意力掩码，防止信息泄露
-> - **推理阶段**: 不添加噪声实例，正常推理
-
-<!-- TODO: 补充你对 TID 的理解，为什么需要它、如何帮助训练 -->
-
-### 核心公式
-
-**GT anchors:**
-
-$$A^{gt} = \{(x, y, z, w, l, h, \text{yaw}, v_x, v_y, v_z)_i \mid i \in \mathbb{Z}_N\}$$
-
-**带噪声 anchors** (对每个 GT 添加 $M$ 组噪声，每组含正负样本):
-
-$$A^{noise} = \{A_i + \Delta A_{i,j,k} \mid i \in \mathbb{Z}_N, \, j \in \mathbb{Z}_M, \, k \in \mathbb{Z}_2\}$$
-
-> 其中 $\Delta A_{i,j,1} \sim U(-x, x)$ (正样本噪声)，$\Delta A_{i,j,2} \sim U(-2x, -x) \cup (x, 2x)$ (负样本噪声)。
-> 使用**二分图匹配** (而非简单阈值) 来确定正负样本，避免 DINO 中可能的误分配。
-
-### 核心思路
-
-<!-- TODO: 补充 -->
-- 灵感来自 DN-DETR，但扩展到 3D 时序检测场景
-- 提供密集监督信号，稳定匈牙利匹配的训练过程
-- 时序去噪实例: 从上一帧 GT 出发加噪声 → 传播到当前帧 → 要求去噪回当前帧 GT
-- 特别有助于时序分支，教会模型正确处理实例传播
-
-## 3.6 关键改进: Quality Estimation
-
-<!-- TODO: 补充你对 Quality Estimation 的理解 -->
-
-分类置信度不能准确反映检测框质量。v3 引入两个质量指标作为辅助监督：
-
-### Centerness (中心度)
-
-$$C_{\text{gt}} = \exp\big(-\|[x, y, z]_{\text{pred}} - [x, y, z]_{\text{gt}}\|_2\big)$$
-
-> **连续值**，范围 $(0, 1]$。用当前**预测框中心**与**GT中心**的欧氏距离计算。
-> - 重合 → $d=0$ → $C_{\text{gt}}=1$
-> - 偏离 1m → $C_{\text{gt}}≈0.37$
-> - 偏离越远 → $C_{\text{gt}}→0$
->
-> ⚠️ 论文写 $\exp(-\|\Delta\|^2)$，代码实际用 `torch.norm(p=2)` 即 $\exp(-\|\Delta\|_2)$，以代码为准。
->
-> **关键**: 不同 decoder 层的预测不同 → 每层 centerness GT 也不同，形成"你这个预测定位有多准"的自适应监督。
-
-### Yawness (朝向度)
-
-**论文公式** (Eq.4，连续值):
-
-$$Y = [\sin\text{yaw}, \cos\text{yaw}]_{\text{pred}} \cdot [\sin\text{yaw}, \cos\text{yaw}]_{\text{gt}} = \cos(\Delta\text{yaw})$$
-
-> 两个单位向量的点积 = $\cos(\Delta\text{yaw})$，范围 $[-1, 1]$，**论文给的是连续值**。
-
-**代码实现** (二值化简化):
-
-```python
-yns_target = (cosine_similarity(...) > 0).float()  # cos>0 → 1.0, cos≤0 → 0.0
-```
-
-> ⚠️ **论文与代码有差异**: 论文公式是连续的 $\cos(\Delta\text{yaw})$，但代码用 `> 0` 截断成了 **0/1 二值**。以代码为准:
-> - 朝向差 < 90° → $Y_{\text{gt}}=1$
-> - 朝向差 ≥ 90° → $Y_{\text{gt}}=0$
-
-### 正负样本的 GT 设置 (实操细节)
-
-<!-- TODO: 补充你对正负样本 GT 设置的理解 -->
-
-**核心代码** (来源: `projects/mmdet3d_plugin/models/detection3d/losses.py`):
-
-```python
-# quality 网络输出: quality[..., CNS] = centerness logits, quality[..., YNS] = yawness logits
-cns = quality[..., CNS]                     # centerness 预测值 (logits)
-yns = quality[..., YNS].sigmoid()           # yawness 预测值 (sigmoid 后)
-
-# ---- 只对正样本 (mask=True) 计算 quality loss ----
-# mask 来自匈牙利匹配: 匹配到 GT 的是正样本, 未匹配的是负样本
-# 代码中: qt = qt.flatten(end_dim=1)[mask]  只取正样本的 quality 预测
-
-# Centerness GT: 用预测框和 GT 框的中心点距离计算
-cns_target = torch.norm(
-    box_target[..., [X, Y, Z]] - box[..., [X, Y, Z]], p=2, dim=-1
-)                       # || pred_center - gt_center ||_2
-cns_target = torch.exp(-cns_target)  # exp(-distance) → 越近越接近1
-
-# Yawness GT: 判断预测朝向与GT朝向的cos相似度是否 > 0 (二值)
-yns_target = (
-    torch.nn.functional.cosine_similarity(
-        box_target[..., [SIN_YAW, COS_YAW]],
-        box[..., [SIN_YAW, COS_YAW]],
-        dim=-1,
-    ) > 0
-).float()               # 朝向一致 → 1.0, 朝向相反 → 0.0
-```
-
-**总结:**
-
-| | 正样本 (匹配到 GT) | 负样本 (未匹配到 GT) |
-|---|---|---|
-| **Centerness GT** | $C_{\text{gt}} = \exp(-\|[x,y,z]_{\text{pred}} - [x,y,z]_{\text{gt}}\|_2^2)$, 连续值 ∈ (0, 1] | **不参与计算** (被 mask 过滤掉) |
-| **Yawness GT** | 论文: $\cos(\Delta\text{yaw})$ 连续值; 代码: `>0` 二值化后 {0, 1} | **不参与计算** (被 mask 过滤掉) |
-| **网络预测** | $C_{\text{pred}}$ (logit), $Y_{\text{pred}}$ (sigmoid 后) | 输出但被 mask 忽略 |
-
-> **注意**: Quality Estimation 的 loss **只对正样本计算**。负样本通过 `mask` 过滤掉，不产生 centerness/yawness 损失。
-
-> **特殊处理**: nuScenes 中某些类别 (如 barrier) 不区分正反方向，代码中 `cls_allow_reverse` 会对这些类别的 GT yaw 做翻转对齐，确保 yawness 判断正确。
-
-### Quality Estimation 损失
-
-$$\mathcal{L} = \lambda_1 \text{CrossEntropy}(Y_{\text{pred}}, Y_{\text{gt}}) + \lambda_2 \text{GaussianFocal}(C_{\text{pred}}, C_{\text{gt}})$$
-
-> Centerness 用 BCE with Sigmoid (`CrossEntropyLoss, use_sigmoid=True`)，Yawness 用 Gaussian Focal Loss (`GaussianFocalLoss`)。**仅对正样本**计算。
-
-### 推理时怎么用 Quality?
-
-```python
-# 推理时: 最终得分 = 分类置信度 × centerness_sigmoid
-centerness = quality[output_idx][..., CNS]
-cls_scores *= centerness.sigmoid()    # 乘以 centerness 作为最终排序分数
-```
-
-> 即 `final_score = classification_confidence × sigmoid(centerness_pred)`，centerness 越高的框最终得分越高，低质量的框被压低分数后过滤掉。yawness 不参与推理评分，仅在训练时提供辅助监督。
-
-## 3.7 关键改进: End-to-End Tracking
+## 3.6 End-to-End Tracking
 
 <!-- TODO: 补充你对端到端跟踪的理解 -->
 
@@ -1392,7 +1544,7 @@ class InstanceBank(nn.Module):
 
 > 注意: 训练时不需要任何跟踪约束的微调，训练好的时序检测模型直接具备跟踪能力。
 
-## 3.8 v3 性能 (nuScenes)
+## 3.7 v3 性能 (nuScenes)
 
 | Backbone | Split | NDS | mAP | AMOTA |
 |----------|-------|-----|-----|-------|
