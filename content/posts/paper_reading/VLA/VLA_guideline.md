@@ -80,7 +80,21 @@ https://arxiv.org/abs/2304.07193
 
 ---
 
-### 4. SigLIP（OpenVLA使用）
+### 4. DINOv3（最新，DINOv2 的强力升级）
+
+🔗 **精读笔记**: [DINOv3.md](DINOv3.md)
+
+https://arxiv.org/abs/2508.10104
+
+**重点：**
+
+* **Gram anchoring**：新损失，专治长训练 dense（patch 级）特征退化
+* 规模化到 17 亿图 / 7B 参数 + 砍掉超参 schedule
+* frozen backbone 在分割/检测/深度上超越专门 SOTA —— 可作 DINOv2 的 drop-in 升级
+
+---
+
+### 5. SigLIP（OpenVLA使用）
 
 🔗 **精读笔记**: [SigLIP.md](SigLIP.md)
 
