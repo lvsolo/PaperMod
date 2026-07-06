@@ -17,6 +17,7 @@ minify:
 
 
 params:
+  math: true # enable KaTeX rendering ($...$ / $$...$$) site-wide
   env: production # to enable google analytics, opengraph, twitter-cards and schema.
   title: ExampleSite
   description: "ExampleSite description"

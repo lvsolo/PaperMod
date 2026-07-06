@@ -465,6 +465,8 @@ weight_decay和L2正则的区别
 
 快速近似最近邻匹配:ratio=最近匹配点距离/次近匹配点距离,ratio尽量小才好,相当于匹配的点(类内距)距离小,不匹配的点(类间距)距离大
 
+匈牙利匹配：
+
 22.常用的相似度计算方式:
 
 欧式距离
@@ -474,6 +476,185 @@ weight_decay和L2正则的区别
 余弦相似度
 
 23.ROI Pooling ROI Align
+ROI Pooling 和 ROI Align 是 两阶段检测（Faster R-CNN 系列）里的核心操作，你可以把它理解为：
+
+把任意大小的候选框（RoI） → 变成固定尺寸特征（比如 7×7）
+
+但它们的差异其实非常关键，甚至直接影响检测精度（尤其是 mask / keypoint / 3D）。
+
+我按你熟悉的“工程 + 数学”方式讲清楚。
+
+🧠 一、先解决一个根本问题
+
+在检测里：
+
+不同目标 → 框大小不同
+
+但后面的 FC / head 要求：
+
+固定尺寸输入（比如 7×7）
+
+👉 所以需要：
+
+RoI → fixed-size feature
+📦 二、ROI Pooling（Faster R-CNN 原版）
+✅ 核心流程
+Step 1️⃣ 坐标量化（关键问题来源）
+
+把 RoI 映射到 feature map：
+
+(x1, y1, x2, y2) → feature map 上的位置
+
+👉 然后：
+
+全部取整（quantization）
+Step 2️⃣ 划分网格
+
+比如：
+
+输出 7×7
+
+👉 就把 RoI 划分成：
+
+7 × 7 bins
+Step 3️⃣ 每个 bin 做 max pooling
+每个 bin → 取最大值
+📌 总结
+ROI Pooling = quantize + grid + max pooling
+⚠️ 三、ROI Pooling 的致命问题
+
+👉 量化误差（misalignment）
+
+❗ 问题在哪？
+
+两次量化：
+
+① RoI 边界量化
+float → int
+② bin 边界量化
+
+再来一次：
+
+再取整
+🔥 后果
+feature 和真实位置对不齐
+
+👉 在任务中：
+
+bbox：影响不算特别大
+mask / keypoint：灾难 ❌
+🚀 四、ROI Align（Mask R-CNN 提出）
+✅ 核心思想
+完全取消量化（no quantization）
+Step 1️⃣ 保留浮点坐标
+RoI 坐标不取整
+Step 2️⃣ 精确划分 bin（float）
+Step 3️⃣ 每个 bin 采样（关键）
+
+不是 max pooling，而是：
+
+双线性插值（bilinear interpolation）
+📌 具体做法
+
+每个 bin：
+
+采样 4 个点（或更多）
+→ 插值
+→ 再 average / max
+🧠 五、核心差异总结（非常重要）
+	ROI Pooling	ROI Align
+坐标	整数	浮点
+操作	max pooling	bilinear interpolation
+对齐	❌ 不对齐	✅ 精确对齐
+精度	一般	更高
+适合	bbox	mask / keypoint
+🔍 六、一个直观理解（你可以这么记）
+ROI Pooling
+“粗暴切块 + 最大值”
+
+👉 有点像：
+
+把图像像素硬切
+
+ROI Align
+“连续空间采样”
+
+👉 更像：
+
+在连续坐标上取值
+
+🧮 七、ROI Align 的数学本质
+
+给定一个采样点 (x, y)：
+
+不是整数
+
+用周围 4 个点：
+
+(x1,y1), (x1,y2), (x2,y1), (x2,y2)
+
+插值：
+
+f(x,y) =
+  w1 * f(x1,y1)
++ w2 * f(x1,y2)
++ w3 * f(x2,y1)
++ w4 * f(x2,y2)
+
+👉 这是：
+
+连续 → 离散 feature 的映射
+🚀 八、为什么 ROI Align 很重要（你这个方向）
+在 2D detection
+
+提升：
+
+bbox 精度（小幅）
+mask 精度（巨大）
+在 3D / BEV 里（你重点关注）
+
+👉 类似思想大量存在：
+
+✔ BEV feature sampling
+3D point → BEV feature
+
+👉 用的就是：
+
+bilinear interpolation
+✔ BEVFormer / Deformable Attention
+reference point → feature
+
+👉 本质也是：
+
+ROI Align 思想
+🧠 九、一个更深层理解（建议你记住）
+
+👉 ROI Align 本质是：
+
+从“离散grid”
+→ “连续空间建模”
+
+👉 这件事后来演化成：
+
+Deformable Attention
+Grid Sampling
+BEV query sampling
+⚠️ 十、常见误区
+❌ ROI Align = avg pooling
+
+👉 错：
+
+核心是 interpolation，不是 avg
+❌ ROI Pooling 只是精度低一点
+
+👉 不止：
+
+它改变了几何关系（严重问题）
+✅ 最后一行总结
+
+ROI Pooling = 离散 + 量化 + max
+ROI Align = 连续 + 插值 + 精确对齐
+👉 本质差别：是否保留空间几何一致性
 
 24.使用梯度下降求一个数的平方根
 
@@ -849,11 +1030,12 @@ Transformer：
 1.layer normalization
 
 [Transformer中的归一化(五)：Layer Norm的原理和实现 &amp; 为什么Transformer要用LayerNorm - 知乎 (zhihu.com)](https://zhuanlan.zhihu.com/p/492803886)
+![alt text](image/DL_common_sense/image.png)
 
     ![0](https://note.youdao.com/yws/res/1945/WEBRESOURCEad95fa547defd2885276720accb30f80)
 
 2.FFN
-
+LN->relu->LN
 3.GELU：
 
     ![0](https://note.youdao.com/yws/res/1922/WEBRESOURCE6fdb87209ff8caa2f1cdadcb6f4209d8)
@@ -878,3 +1060,6 @@ y(p0)=pn∈R∑w(pn)⋅x(p0+pn+Δpn)
 公式中用Δ p表示偏移量。需要注意的是，该偏移量是针对x的，也就是可变形卷积变的不是卷积核，而是input。
 
     ![0](https://note.youdao.com/yws/res/1927/WEBRESOURCE979623be6959dd0b45d91c09380f99d0)
+
+
+👉 “IoU-aware matching 和 NMS-aware loss 是怎么结合的”

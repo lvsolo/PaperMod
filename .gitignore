@@ -1,0 +1,20 @@
+# ===== DINO 复现工程: 大文件不进仓库 =====
+# 数据集 (STL-10 / CIFAR-10, GB 级)
+content/posts/paper_reading/VLA/DINO/repro/data/
+
+# 训练输出的模型 checkpoint (~109MB/个)
+*.pt
+
+# 旧冒烟测试输出 (只留 STL 的结果图)
+content/posts/paper_reading/VLA/DINO/repro/out_smoke/
+content/posts/paper_reading/VLA/DINO/repro/out_user/
+
+# 训练日志 (含进度条噪声; 关键曲线已在 TODO.md / README 里记录)
+*.log
+
+# ===== Python =====
+__pycache__/
+*.pyc
+
+# ===== 本地 Claude 会话配置 (不推) =====
+.claude/
