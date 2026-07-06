@@ -17,7 +17,7 @@ from torch.utils.data import DataLoader
 
 from model import CLIPWrapper
 from loss import CLIPLoss
-from data import (get_flickr8k, get_cifar, Tokenizer, PROMPT_TEMPLATES, build_transforms, to_pil)
+from data import (get_flickr8k, get_cifar, Tokenizer, PROMPT_TEMPLATES, build_transforms, to_pil, CIFAR_CFG)
 
 
 def cosine_scheduler(base_lr, warmup_ep, total_ep, steps):
@@ -158,6 +158,9 @@ def main():
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
     os.makedirs(args.out, exist_ok=True)
+    # CIFAR/STL 强制用原生分辨率(CIFAR=32, STL=96), 免得忘传 --img-size(默认96给Flickr) 导致 CIFAR OOM
+    if args.dataset != "flickr8k":
+        args.img_size = CIFAR_CFG[args.dataset]["img"]
 
     if args.dataset == "flickr8k":
         loader, test_ds, eval_tf, tokenizer = get_flickr8k(

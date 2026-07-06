@@ -39,9 +39,9 @@ PROMPT_TEMPLATES = [
 ]
 
 CIFAR_CFG = {
-    "cifar100": dict(classes=CIFAR100_CLASSES),
-    "cifar10":  dict(classes=CIFAR10_CLASSES),
-    "stl10":    dict(classes=STL10_CLASSES),
+    "cifar100": dict(classes=CIFAR100_CLASSES, img=32),
+    "cifar10":  dict(classes=CIFAR10_CLASSES,  img=32),
+    "stl10":    dict(classes=STL10_CLASSES,    img=96),
 }
 
 
