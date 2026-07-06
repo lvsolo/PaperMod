@@ -162,7 +162,10 @@ def main():
                            koleo_weight=args.koleo_weight).to(device)
     opt = torch.optim.AdamW([p for p in student.parameters() if p.requires_grad],
                             lr=args.lr, weight_decay=args.weight_decay)
-    lrs = cosine_scheduler(args.lr, 1e-6, 10, args.epochs, len(loader))
+    # warmup 自适应: 原来写死 10, 但 epochs≤10 时 warmup==total → lr 全程爬升不衰减、末期最高
+    # → 后期不稳定、特征退化(实测 STL 10ep: ep5 k-NN 29% → ep10 14%)。改成 epochs//5(上限10)。
+    warmup_ep = min(10, max(1, args.epochs // 5))
+    lrs = cosine_scheduler(args.lr, 1e-6, warmup_ep, args.epochs, len(loader))
     moms = momentum_schedule(args.momentum, args.epochs)
 
     for ep in range(args.epochs):
