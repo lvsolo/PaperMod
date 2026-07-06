@@ -258,6 +258,39 @@ $$P_t = \text{softmax}\left( (g_t - c) / \tau_t \right)$$
 - 只用 sharpening → 仍会 collapse
 - centering + sharpening → 训练稳定，无需负样本！
 
+### 2.5.1 深入：为什么 centering 和 sharpening 缺一不可？
+
+上面只说了"防独大 / 防太平坦"，没讲透。这里把**坍塌的两种形态**和**两个 trick 各自堵哪条退路**讲清楚——这是 DINO 最精妙的地方。
+
+**① 为什么有坍塌风险？** DINO 没有负样本（不像 CLIP/SimCLR 靠"推开不同图"防退化），损失是 student/teacher 两个 $K=65536$ 维分布的交叉熵。这存在**平凡解**：对所有图都输出**同一个分布** → student 完美匹配 teacher → loss=0，但表征里**零信息**。这就是 collapse。具体有两种形态：
+
+```mermaid
+flowchart LR
+    subgraph A["形态 A: 均匀坍塌"]
+        A1["输出平坦均匀分布<br/>每维 1/K<br/>(没有承诺, 无信息)"]
+    end
+    subgraph B["形态 B: 主导维坍塌"]
+        B1["永远尖峰在同一个维度<br/>所有图都落第 0 维<br/>(单一维度垄断, 无信息)"]
+    end
+```
+
+**② Sharpening（teacher 小温度 $\tau_t$）专杀形态 A。** 温度小 → teacher 分布被迫**尖锐、有承诺**（质量集中到少数维）。一个均匀目标太容易匹配（student 也输出均匀即可）→ 退化；sharpening 让目标"有内容"，student 必须真的依赖输入才能匹配。但 sharpening **单独**挡不住形态 B——teacher 可以永远尖峰在同一维。
+
+**③ Centering（teacher 减去输出均值的 EMA $c$）专杀形态 B。** $c$ 慢慢追踪 teacher 输出的平均方向；若 teacher 想永远把质量堆在第 0 维，$c_0$ 就涨，$(z-c)_0$ 被拉回 → softmax 不再总峰在第 0 维。centering 强制"**全 batch 平均下来各维被均衡使用**"，单一维度没法垄断。
+
+**④ 为什么缺一不可（关键）：**
+- 只 sharpening：堵住均匀（A），但 B（永远同一维）仍可逃。
+- 只 centering：堵住 B，但 **A 仍可逃**——因为均匀分布**本身就是 center 的**（$z=c \Rightarrow z-c=0 \Rightarrow$ softmax 均匀，且它居中 → 两个条件都满足 → 均匀坍塌）。
+- **两个一起**：把两条平凡退路都堵死，**剩下的唯一解**就是"尖锐 + 依赖输入 + 各维均衡使用"——即不同图峰在不同维、整体各维被均匀占用 → 一个有意义的离散聚类表征。这正是我们要的。
+
+**⑤ 桶比喻（最好记）**：把 $65536$ 维想成 $65536$ 个"桶"（原型）。
+- 坍塌 = 所有图进同一个桶，或均匀散开（都没信息）。
+- **centering = 各桶被平均均衡使用（不许某个桶垄断）** ← 杀形态 B。
+- **sharpening = 每张图必须死磕某一个桶（不许和稀泥）** ← 杀形态 A。
+- 两者合力 → 每张图明确选一个桶、图之间把桶均匀占满 → 有意义的聚类表征。
+
+**⑥ 和负样本的关系**：CLIP/SimCLR 靠**负样本**"推开不同图"防坍塌（所以要大 batch 凑负样本）。DINO 靠对 teacher 输出统计量的这两个正则**不需要负样本**——这就是 **DINO 不需要超大 batch** 的根本原因，也是它相对对比学习的优雅之处。
+
 ## 2.6 Teacher 更新：EMA
 
 teacher 不接收梯度！它的参数来自 student 的指数滑动平均（EMA）：
