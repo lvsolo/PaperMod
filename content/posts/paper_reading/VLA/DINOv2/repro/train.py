@@ -67,7 +67,10 @@ def knn_eval(backbone, ltrain, ltest, device, k=20):
     ftr, ytr = extract_features(backbone, ltrain, device)
     fte, yte = extract_features(backbone, ltest, device)
     ftr, fte = F.normalize(ftr), F.normalize(fte)
-    pred = ytr[fte @ ftr.t()].mode(dim=1).values
+    sim = fte @ ftr.t()                       # (Mtest, Mtrain) 余弦相似度
+    nn_idx = sim.topk(k, dim=1).indices       # (Mtest, k) 每个测试样本最近的 k 个训练样本
+    nn_labels = ytr[nn_idx]                   # (Mtest, k) 它们的标签(索引必须是 long, sim.topk 返回的就是 long)
+    pred = nn_labels.mode(dim=1).values       # (Mtest,) k 个邻居投票取众数
     return (pred == yte).float().mean().item()
 
 
@@ -133,7 +136,9 @@ def main():
     p.add_argument("--batch-size", type=int, default=32)
     p.add_argument("--lr", type=float, default=5e-4)
     p.add_argument("--weight-decay", type=float, default=1e-4)
-    p.add_argument("--out-dim", type=int, default=65536)
+    p.add_argument("--out-dim", type=int, default=16384,
+                   help="投影输出维。DINO 满配用 65536，但 patch 级 logits=(B*n_global, N, out) 极占显存，"
+                        "8GB 卡上 65536 必 OOM；16384 足够复现机制且省 4 倍显存。")
     p.add_argument("--local-crops", type=int, default=8)
     p.add_argument("--momentum", type=float, default=0.996)
     p.add_argument("--mask-ratio", type=float, default=0.3, help="iBOT 每 global crop mask 的 patch 比例")

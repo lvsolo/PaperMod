@@ -74,7 +74,13 @@ class DINOv2Loss(nn.Module):
             再对 n_global 个 crop 取平均。
         提示: mask 是 bool, 转 float 后和 per 相乘; 分母 clamp_min(1) 防止全 False 除零。
         """
-        raise NotImplementedError("TODO: 实现 ibot_patch_loss (masked patch 交叉熵)")
+        total = 0.0
+        for i in range(len(student_patch_chunks)):                       # 遍历每个 global crop
+            logp = F.log_softmax(student_patch_chunks[i] / self.student_temp, dim=-1)
+            per = -torch.sum(teacher_patch_chunks[i] * logp, dim=-1)      # (B, N) 每个 patch 的损失
+            m = mask_chunks[i].float()
+            total = total + (per * m).sum() / m.sum().clamp_min(1)        # 只在被 mask 处累加, 除以 mask 数
+        return total / len(student_patch_chunks)                          # n_global 个 crop 取平均
 
     # ====================================================================
     # TODO 2/2  —— KoLeo 正则  (DINOv2.md §2.3)
@@ -93,7 +99,13 @@ class DINOv2Loss(nn.Module):
             3) loss = -mean( log(d_i + eps) )     # 越大(分布越开) loss 越小
         提示: dist = sqrt(((x[:,None,:]-x[None,:,:])**2).sum(-1) + 1e-12); 用 .fill_diagonal_(inf)。
         """
-        raise NotImplementedError("TODO: 实现 koleo_loss (球面均匀分布正则)")
+        dist = torch.cdist(x, x, p=2)                                   # (M, M) —— 反向要用到它, 不能原地改!
+        n = dist.shape[0]
+        # 把对角线置 inf 排除自己, 但用【非原地】方式(加一个 inf 对角阵), 否则破坏 cdist 的反向图
+        dist = dist + torch.diag(torch.full((n,), float('inf'), device=dist.device))
+        d_i = dist.min(dim=1).values
+        loss = -torch.mean(torch.log(d_i + 1e-12))
+        return loss
 
     # -------------------- 脚手架: 组合 + center 更新 (已写好, 调用上面两个 TODO) --------------------
     def forward(self, student_out, teacher_out, masks, epoch):
@@ -119,5 +131,7 @@ class DINOv2Loss(nn.Module):
 
     @torch.no_grad()
     def _update_center(self, center, teacher_logits):
-        bc = teacher_logits.mean(dim=0, keepdim=True)
+        # center: (1, out_dim)。teacher_logits 对 cls 是 (M, out_dim)、对 patch 是 (M, N, out_dim)。
+        # 把前面所有维 flatten 掉再 mean, 统一得到 (1, out_dim) —— cls / patch 两套 center 都能更新。
+        bc = teacher_logits.reshape(-1, teacher_logits.shape[-1]).mean(dim=0, keepdim=True)
         center.mul_(self.center_momentum).add_(bc, alpha=1 - self.center_momentum)

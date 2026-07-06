@@ -9,6 +9,9 @@ content/posts/paper_reading/VLA/DINO/repro/data/
 content/posts/paper_reading/VLA/DINO/repro/out_smoke/
 content/posts/paper_reading/VLA/DINO/repro/out_user/
 
+# DINOv2 复现输出 (checkpoint/attention 图/日志, 都不进仓库)
+content/posts/paper_reading/VLA/DINOv2/repro/out_*/
+
 # 训练日志 (含进度条噪声; 关键曲线已在 TODO.md / README 里记录)
 *.log
 

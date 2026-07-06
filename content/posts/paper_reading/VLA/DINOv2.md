@@ -272,6 +272,39 @@ class iBOTPatchLoss(nn.Module):
 
 > **关键对应**：`softmax_center_teacher` 里的 `(teacher_output - self.center) / teacher_temp` 就是 DINO 论文里的 **centering + sharpening**；`update_center` / `apply_center_update` 是 **center 的 EMA 更新**。两者都是防止自蒸馏 collapse 的标准技巧——没有它们，teacher/student 很容易退化成常数输出。
 
+### 2.2.3 iBOT loss vs DINO loss：作用范围对比（常见疑问）
+
+DINOv2 同时跑两个损失，但它们**作用在哪些 crop 上、目标是什么**很容易混。一张表说清：
+
+| | DINO loss（image-level / cls） | iBOT loss（patch-level） |
+|---|---|---|
+| 作用对象 | `[cls]` token | 各 patch token |
+| 用哪些 crop | **全部 10 个**（2 global + 8 local） | **只有 2 个 global crop** |
+| teacher 看哪些 crop | 2 个 global | 2 个 global |
+| student 看哪些 crop | 2 global + 8 local | 2 global（且随机 mask 掉部分 patch） |
+| 学什么 | 不同视角 → 同一全局语义 | 掩码一块 patch → 预测它（空间重建） |
+| 防 collapse 的 center | `center_cls`（独立） | `center_patch`（独立） |
+
+> **关键**：两个损失**共用同一个 EMA teacher**（student 的滑动平均），但各有一套 centering（`center_cls` / `center_patch` 分别 EMA 更新），因为 cls 和 patch 的输出分布不同，要分别做 centering + sharpening 防坍塌。
+
+**常见疑问：为什么 iBOT 只在 global crop 上算，不用 local view？**
+
+1. **teacher 压根不看 local crop**。iBOT 是"student 被掩码的 patch ↔ teacher 完整的 patch"做交叉熵，teacher 只处理 2 个 global，local crop 没有对应 patch 目标，自然没法算 iBOT。
+2. **local crop 太小、patch 太少**，掩码预测信号弱。global view patch 多、覆盖完整场景，适合"挡住一块猜它是什么"的空间重建。
+3. **分工不同**：local view 是为 DINO 的"多视角语义一致性"（看局部和看整体 → 同一语义）服务的；iBOT 的"密集空间重建"只在完整大图上做才有意义。官方代码 `forward_backward` 里 iBOT 也只作用在 `global_crops` 上。
+
+**"global / local crop"到底是什么？**（来自 multi-crop，DINO 沿用）
+
+```mermaid
+flowchart LR
+    IMG["原图"] --> G["global view ×2<br/>RandomResizedCrop scale=(0.4, 1.0)<br/>占原图面积 40%~100% → 看到主体"]
+    IMG --> L["local view ×8<br/>scale=(0.05, 0.4)<br/>占面积 5%~40% → 只看局部"]
+    G --> CLS["喂 cls 级 DINO loss<br/>+ patch 级 iBOT loss(student 端被 mask)"]
+    L --> CLS2["只喂 cls 级 DINO loss"]
+```
+
+"global" **不是固定阈值**（不是">50%"），而是相对含义：global 的下限 `0.4` 正好接 local 的上限 `0.4`——global = 保留图像主体的大裁剪，local = 只截一小块。DINO loss 靠"global 和 local 视角不同但语义一致"学**视角不变性**；iBOT 靠"在 global 大图上掩码重建"学**密集空间结构**（对分割/检测友好）。
+
 ## 2.3 KoLeo 正则化
 
 **动机**：希望学到的特征在空间中分布均匀（避免特征坍缩到某个子空间，提升 retrieval/泛化）。
