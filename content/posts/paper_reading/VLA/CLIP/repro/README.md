@@ -1,66 +1,63 @@
-# CLIP repro —— 最小复现 (CIFAR-100 + class-prompt + zero-shot)
+# CLIP repro —— 最小复现 (Flickr8k 真实 caption + 图文检索)
 
 > 目标同 DINO/DINOv2 repro：用最小数据 + 算力复现论文的**机制**（不追 SOTA），靠**手填关键算法**加深理解。
-> CLIP 的机制 = **双塔对比学习（对称 InfoNCE）+ zero-shot 推理**。
-> 数据用分类集（CIFAR-100/10、STL-10）+ 类名套 prompt 模板造图文对 —— 零额外下载，能完整跑通
-> "对比训练 → zero-shot 分类"这条 CLIP 招牌链路。
+> CLIP 的机制 = **双塔对比学习（对称 InfoNCE）+ 图文跨模态检索**。
+>
+> **数据集选 Flickr8k（真实 caption）而非 CIFAR+类名**，原因见下。CIFAR/STL 作为零下载备选保留。
+
+## 为什么用 Flickr8k 而不是 CIFAR+类名（关键）
+
+CLIP 的 InfoNCE 假设：**每张图有独一无二的匹配文本，batch 内其余文本全是负样本**。
+
+- **CIFAR+类名 prompt**：只有 100 句重复 prompt（500 张猫图共用 "a photo of a cat"）→ ① **假负样本**（同类的相同文本被当负样本推开）；② **文本塔学不到语言**（只学 100 个点）。本质是"用文本塔伪装的分类器"，不是真 CLIP。
+- **Flickr8k**：8091 图 × 5 句**各不相同**的真实自然语言 caption → ① 无假负样本，对比损失按设计 work；② 文本塔真学语言；③ 用**标准图文检索 R@1/5/10**评估（CLIP/COCO 标准指标）。**这才是真 CLIP。**
 
 ## 0. 你要填的两个 TODO
 
 | TODO | 文件 | 是什么 | 对照 |
 |---|---|---|---|
-| ① `clip_contrastive_loss` | loss.py | 对称 InfoNCE：batch 内 N 个图文对，对角线正样本、其余负样本，图→文 + 文→图两向交叉熵取平均 | CLIP.md §2.2 |
-| ② `zero_shot_classify` | train.py | zero-shot 分类：测试图嵌入 vs 各类 prompt 文本嵌入比余弦相似度，argmax | CLIP.md §3.1 |
+| ① `clip_contrastive_loss` | loss.py | 对称 InfoNCE：batch 内 N 个图文对，对角线正样本、其余负样本，图→文 + 文→图交叉熵取平均 | CLIP.md §2.2 |
+| ② `retrieve_topk` | train.py | 按余弦相似度取 top-k：`query @ candidate.T` 后 topk。**图文检索（Flickr8k）和 zero-shot（CIFAR）共用** | CLIP.md §3.1 |
 
-> 两个 TODO 各 3-5 行。模型（CNN 图像塔 + Transformer 文本塔 + 投影头 + logit_scale）、
-> 数据（CIFAR + prompt 模板 + 词级 tokenizer）、训练循环、ensemble zero-shot 评估**全预填**，调用你这两个函数。
+> 两个 TODO 各 1-3 行。模型（小 ResNet 图像塔 + Transformer 文本塔 + 投影 + 可学习 logit_scale）、
+> Flickr8k 加载/词表/检索评估、CIFAR zero-shot、训练循环**全预填**，调用你这两个函数。
 
-### 为什么是这两个 TODO？
-- **对比损失**是 CLIP 的核心：一切魔法都在"把匹配图文拉近、不匹配推远"里。填完你就理解了 InfoNCE。
-- **zero-shot**是 CLIP 的招牌能力：不训分类头，靠图文跨模态相似度直接分类。填完你就理解了 CLIP 为什么"开箱即用"。
+## 1. 小数据能训出 CLIP 效果吗？
 
-## 1. 小数据能训出 CLIP 效果吗？（你最关心的）
-
-**能，但要管理预期。** 本复现用 CIFAR-100（50k 图 × 100 类）+ class-prompt 当文本：
-- **会有效果**：zero-shot top-1 会从随机 1% 爬到 30~50%（小 ResNet + 小 Transformer，~20 epoch）。i2t/t2i retrieval acc（batch 内正样本能否排第一）会从随机爬到 80%+。**机制完整 work**。
-- **复现不了的部分**：CLIP 的"语言泛化"（任意自然语言指令）。因为文本端只见到 100 个类名级 prompt，不是真实 caption。要复现那部分得 WIT/LAION 级（4 亿图文对）数据 + 大算力，超出"最小复现"范围。
-- 和 DINO repro 同理：复现**机制 + 涌现**，不追绝对分数。
+**能。** Flickr8k（6000 训练图 × 5 caption = 3 万对，~1GB）：
+- **图文检索 R@1** 会从随机 ~0.2% 爬到 **10~30%**（小模型，~30 epoch）；R@5/R@10 更高。batch 内 retrieval acc（正样本排第一）爬到 80%+。**机制完整 work，是标准 CLIP 评估。**
+- 复现不了 CLIP 的"海量数据带来的强泛化"（要 WIT/LAION 4 亿对），但"对比对齐 + 跨模态检索"这条 CLIP 核心链路能完整验证。
 
 ## 2. 怎么跑
 
 ```bash
 cd content/posts/paper_reading/VLA/CLIP/repro
 
-# 复用 v1 已下数据目录(cifar100 会自动下 ~170MB; cifar10/stl10 已在):
-DATA=/home/lvsolo/work/git/PaperMod/content/posts/paper_reading/VLA/DINO/repro/data
+# Flickr8k(推荐, 首次自动下 ~1GB, 之后缓存):
+python3 train.py --dataset flickr8k --epochs 30 --batch-size 64 --img-size 96 --out out_flickr8k
 
-# 填完两个 TODO 后, 跑 CIFAR-100(~30-60 min, RTX 2070):
-python3 train.py --dataset cifar100 --epochs 20 --batch-size 256 \
-  --data $DATA --out out_cifar100
-
-# 或用已下好的 CIFAR-10/STL-10(10 类, zero-shot 更粗):
-python3 train.py --dataset cifar10  --epochs 20 --batch-size 256 --data $DATA --out out_cifar10
-python3 train.py --dataset stl10    --epochs 20 --batch-size 128 --data $DATA --out out_stl10
+# CIFAR-100(备选, 零下载, zero-shot 分类评估):
+python3 train.py --dataset cifar100 --epochs 20 --batch-size 256 --out out_cifar100
 ```
-> CLIP 没有 EMA/自蒸馏，就是个标准监督 loop；batch 大（256）对对比学习很重要（负样本多）。
-> STL-10 图大（96px），batch 调小到 128；CIFAR（32px）batch 256 轻松。
+> CLIP 无 EMA/自蒸馏，就是标准监督 loop。Flickr 图大→batch 64、img 96；CIFAR 32px→batch 256。
+> Flickr8k 首次跑会下 ~1GB（HF `jxie/flickr8k`），下完缓存，后续秒载。
 
-## 3. 预期（CIFAR-100, ~20 epoch）
+## 3. 预期（Flickr8k, ~30 epoch）
 
-- **zero-shot top-1 高于随机 1%**、对比 loss 平稳下降 → 机制 work。
-- log 里 **i2t_acc / t2i_acc**（batch 内正样本 retrieval）持续升到 80%+ → 对齐在学。
-- **scale**（= exp(logit_scale)，相似度乘子，初始 ≈14.3 = 1/0.07，等价 softmax 温度 0.07）随训练变化（CLIP 学到的温度）。
-- 老实话：比不过真 CLIP（400M 对 + ViT-L），但"对比对齐 + zero-shot"两条链路都能验证。
+- **i2t / t2i R@1 高于随机 0.2%**、对比 loss 平稳下降 → 机制 work。
+- log 里 **i2t_acc / t2i_acc**（batch 内正样本 retrieval）升到 80%+ → 对齐在学。
+- **scale**（= exp(logit_scale)，初始 ≈14.3 = 1/0.07）随训练变化（CLIP 学到的温度）。
+- 老实话：比不过真 CLIP（4 亿对 + ViT-L），但"对比对齐 + 跨模态检索"都能验证。
 
 ## 4. 对照阅读
 
-- 算法原理 + 官方代码：`../CLIP.md`（§2.2 InfoNCE、§3 zero-shot）
+- 算法原理 + 官方代码：`../CLIP.md`（§2.2 InfoNCE、§3 zero-shot/检索）
 - 同系列复现：`../../DINO/repro/`（自蒸馏）、`../../DINOv2/repro/`（+iBOT+KoLeo）
-- 框架/约定：仓库根 `精读文档写作规范.md` §11（最小复现流程）
+- 框架/约定：仓库根 `精读文档写作规范.md` §11
 
 ## 5. 想法卡住时
 
-两个 TODO 的实现思路都写在各自函数的 docstring 里（loss.py / train.py），照着"实现思路"四步写即可。
-- ① 对称 InfoNCE 的关键是：相似度矩阵 `image_emb @ text_emb.t()` 的**对角线是正样本**，用 `arange(N)` 当 label 做两次交叉熵（图→文 + 文→图）取平均。原理对照 `../CLIP.md` §2.2。
-- ② zero-shot 的关键是：`image_emb @ class_text_emb.t()` 相似度最大的类就是预测，`.argmax(dim=1)`。原理对照 `../CLIP.md` §3.1。
-- 真卡住再看本目录 `_solution/`（参考实现，填好后我会放进去）。
+两个 TODO 的思路都在各自 docstring 里（loss.py / train.py）：
+- ① 对称 InfoNCE：相似度矩阵 `image_emb @ text_emb.t()` 的**对角线是正样本**，`arange(N)` 当 label 做两次交叉熵（图→文 + 文→图）取平均。对照 `../CLIP.md` §2.2。
+- ② retrieve_topk：`sim = query_emb @ candidate_emb.t()`，`sim.topk(k, dim=1).indices`。对照 `../CLIP.md` §3.1。
+- 真卡住再看本目录 `_solution/`（参考实现，填好后放进去）。
