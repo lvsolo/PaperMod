@@ -69,7 +69,7 @@ https://arxiv.org/abs/2104.14294
 
 ### 3. DINOv2（强烈推荐）
 
-🔗 **精读笔记**: [DINOv2.md](DINOv2.md)
+🔗 **精读笔记**: [DINOv2.md](DINOv2.md)  ·  **复现代码**: [DINOv2/repro/](DINOv2/repro/)
 
 https://arxiv.org/abs/2304.07193
 
