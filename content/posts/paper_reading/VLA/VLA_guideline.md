@@ -131,7 +131,7 @@ image token ↔ text token 对齐
 
 ### 1. CLIP
 
-🔗 **精读笔记**: [CLIP.md](CLIP.md)
+🔗 **精读笔记**: [CLIP.md](CLIP.md)  ·  **复现代码**: [CLIP/repro/](CLIP/repro/)
 
 https://arxiv.org/abs/2103.00020
 
